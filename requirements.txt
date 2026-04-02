@@ -1,0 +1,5 @@
+python-telegram-bot
+openai
+anthropic
+python-dotenv
+tavily-python
