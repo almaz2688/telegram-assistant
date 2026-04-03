@@ -1,4 +1,5 @@
 import os
+import base64
 import anthropic
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -50,9 +51,12 @@ async def text_to_voice(text, file_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я твой личный помощник 🤖\n\n"
-        "Могу искать информацию в интернете, 2ГИС, Яндекс картах.\n"
-        "Отвечаю текстом и голосом!\n"
-        "Пиши текстом или отправляй голосовые сообщения!"
+        "Умею:\n"
+        "🎙 Принимать голосовые сообщения\n"
+        "🔍 Искать информацию в интернете\n"
+        "🖼 Анализировать фотографии\n"
+        "🔊 Отвечать голосом\n\n"
+        "Пиши, говори или отправляй фото!"
     )
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,51 +77,80 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(file_path)
     await process_message(update, context, text)
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🖼 Анализирую фото...")
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    os.makedirs("voice_files", exist_ok=True)
+    file_path = f"voice_files/{photo.file_id}.jpg"
+    await file.download_to_drive(file_path)
+    with open(file_path, "rb") as image_file:
+        image_data = base64.standard_b64encode(image_file.read()).decode("utf-8")
+    os.remove(file_path)
+    caption = update.message.caption or "Что на этом фото? Опиши подробно."
+    response = anthropic_client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=1024,
+        system="Ты личный помощник. Отвечай на русском языке. Анализируй фотографии детально и полезно.",
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": image_data,
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": caption
+                }
+            ]
+        }]
+    )
+    assistant_message = response.content[0].text
+    await update.message.reply_text(assistant_message)
+    os.makedirs("voice_files", exist_ok=True)
+    voice_path = f"voice_files/response_{update.message.from_user.id}.mp3"
+    await text_to_voice(assistant_message, voice_path)
+    with open(voice_path, "rb") as voice_file:
+        await update.message.reply_voice(voice=voice_file)
+    os.remove(voice_path)
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await process_message(update, context, update.message.text)
 
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     user_id = update.message.from_user.id
-
     if user_id not in conversation_history:
         conversation_history[user_id] = []
-
     await update.message.reply_text("⏳ Думаю...")
-
     search_result = ""
     if await needs_search(text):
         await update.message.reply_text("🔍 Ищу в интернете...")
         search_result = await search_web(text)
-
     messages = conversation_history[user_id].copy()
-
     user_content = text
     if search_result:
         user_content = f"{text}\n\nРезультаты поиска:\n{search_result}"
-
     messages.append({"role": "user", "content": user_content})
-
     if len(messages) > 20:
         messages = messages[-20:]
-
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=2048,
         system="""Ты личный помощник. Отвечай на русском языке.
-        
 Если тебе предоставлены результаты поиска — используй их для ответа.
 Давай конкретные адреса, телефоны и названия без лишних оговорок.
 Будь конкретным и полезным. Используй эмодзи где уместно.""",
         messages=messages
     )
-
     assistant_message = response.content[0].text
-
     conversation_history[user_id].append({"role": "user", "content": text})
     conversation_history[user_id].append({"role": "assistant", "content": assistant_message})
-
     await update.message.reply_text(assistant_message)
-
     os.makedirs("voice_files", exist_ok=True)
     voice_path = f"voice_files/response_{user_id}.mp3"
     await text_to_voice(assistant_message, voice_path)
@@ -129,6 +162,7 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
     app.run_polling()
