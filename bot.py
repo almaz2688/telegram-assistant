@@ -29,6 +29,15 @@ async def search_web(query):
     except Exception as e:
         return f"Ошибка поиска: {str(e)}"
 
+async def needs_search(text):
+    response = anthropic_client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=10,
+        system="Ты определяешь нужен ли поиск в интернете. Отвечай только YES или NO. YES если вопрос про конкретные места, организации, телефоны, адреса, актуальные события, цены, расписания. NO если это общий вопрос или задача.",
+        messages=[{"role": "user", "content": text}]
+    )
+    return response.content[0].text.strip().upper() == "YES"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я твой личный помощник 🤖\n\n"
@@ -66,20 +75,16 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     await update.message.reply_text("⏳ Думаю...")
 
     search_result = ""
-    keywords = ["найди", "найти", "поиск", "где", "адрес", "телефон", "номер", 
-                "2гис", "яндекс", "карта", "рядом", "ресторан", "кафе", "магазин",
-                "ледовый", "дворец", "больница", "аптека", "школа", "км", "километр"]
-    
-    if any(word in text.lower() for word in keywords):
+    if await needs_search(text):
         await update.message.reply_text("🔍 Ищу в интернете...")
         search_result = await search_web(text)
 
     messages = conversation_history[user_id].copy()
-    
+
     user_content = text
     if search_result:
         user_content = f"{text}\n\nРезультаты поиска:\n{search_result}"
-    
+
     messages.append({"role": "user", "content": user_content})
 
     if len(messages) > 20:
@@ -91,7 +96,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         system="""Ты личный помощник. Отвечай на русском языке.
         
 Если тебе предоставлены результаты поиска — используй их для ответа.
-Когда даёшь список мест, организаций или контактов — форматируй красиво с номерами.
+Давай конкретные адреса, телефоны и названия без лишних оговорок.
 Будь конкретным и полезным. Используй эмодзи где уместно.""",
         messages=messages
     )
