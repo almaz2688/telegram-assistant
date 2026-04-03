@@ -1,11 +1,17 @@
 import os
 import base64
 import anthropic
+import asyncio
+import json
+from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from tavily import TavilyClient
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
+import pytz
 
 load_dotenv()
 
@@ -18,7 +24,12 @@ anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
 
+scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 conversation_history = {}
+bot_instance = None
+
+async def send_reminder(chat_id, text):
+    await bot_instance.send_message(chat_id=chat_id, text=f"⏰ Напоминание: {text}")
 
 async def search_web(query):
     try:
@@ -34,7 +45,7 @@ async def needs_search(text):
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=10,
-        system="Ты определяешь нужен ли поиск в интернете. Отвечай только YES или NO. YES если вопрос про конкретные места, организации, телефоны, адреса, актуальные события, цены, расписания. NO если это общий вопрос или задача.",
+        system="Ты определяешь нужен ли поиск в интернете. Отвечай только YES или NO.",
         messages=[{"role": "user", "content": text}]
     )
     return response.content[0].text.strip().upper() == "YES"
@@ -43,10 +54,26 @@ async def needs_image(text):
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=10,
-        system="Ты определяешь нужно ли генерировать картинку. Отвечай только YES или NO. YES если просят нарисовать, создать изображение, сгенерировать картинку, визуализировать.",
+        system="Ты определяешь нужно ли генерировать картинку. Отвечай только YES или NO. YES если просят нарисовать, создать изображение, сгенерировать картинку.",
         messages=[{"role": "user", "content": text}]
     )
     return response.content[0].text.strip().upper() == "YES"
+
+async def parse_reminder(text):
+    response = anthropic_client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=200,
+        system=f"""Ты извлекаешь информацию о напоминании из текста.
+Текущее время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M')}
+Если просят напомнить — верни JSON: {{"is_reminder": true, "datetime": "YYYY-MM-DD HH:MM", "text": "текст напоминания"}}
+Если не напоминание — верни: {{"is_reminder": false}}
+Только JSON, без пояснений.""",
+        messages=[{"role": "user", "content": text}]
+    )
+    try:
+        return json.loads(response.content[0].text.strip())
+    except:
+        return {"is_reminder": False}
 
 async def generate_image(prompt):
     response = openai_client.images.generate(
@@ -75,8 +102,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 Искать информацию в интернете\n"
         "🖼 Анализировать фотографии\n"
         "🎨 Генерировать картинки\n"
+        "⏰ Ставить напоминания\n"
         "🔊 Отвечать голосом\n\n"
-        "Пиши, говори или отправляй фото!"
+        "Пример: 'напомни мне завтра в 10:00 позвонить Васе'"
     )
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,28 +139,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=1024,
-        system="Ты личный помощник. Отвечай на русском языке. Анализируй фотографии детально и полезно.",
+        system="Ты личный помощник. Отвечай на русском языке.",
         messages=[{
             "role": "user",
             "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": image_data,
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": caption
-                }
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data}},
+                {"type": "text", "text": caption}
             ]
         }]
     )
     assistant_message = response.content[0].text
     await update.message.reply_text(assistant_message)
-    os.makedirs("voice_files", exist_ok=True)
     voice_path = f"voice_files/response_{update.message.from_user.id}.mp3"
     await text_to_voice(assistant_message, voice_path)
     with open(voice_path, "rb") as voice_file:
@@ -144,9 +161,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     user_id = update.message.from_user.id
+    chat_id = update.message.chat_id
+
     if user_id not in conversation_history:
         conversation_history[user_id] = []
+
     await update.message.reply_text("⏳ Думаю...")
+
+    reminder_data = await parse_reminder(text)
+    if reminder_data.get("is_reminder"):
+        try:
+            tz = pytz.timezone("Europe/Moscow")
+            reminder_time = tz.localize(datetime.strptime(reminder_data["datetime"], "%Y-%m-%d %H:%M"))
+            reminder_text = reminder_data["text"]
+            scheduler.add_job(
+                send_reminder,
+                trigger=DateTrigger(run_date=reminder_time),
+                args=[chat_id, reminder_text]
+            )
+            await update.message.reply_text(f"✅ Напоминание установлено!\n⏰ {reminder_data['datetime']}\n📝 {reminder_text}")
+            return
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            return
 
     if await needs_image(text):
         await update.message.reply_text("🎨 Генерирую картинку...")
@@ -174,9 +211,8 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         model="claude-opus-4-5",
         max_tokens=2048,
         system="""Ты личный помощник. Отвечай на русском языке.
-Если тебе предоставлены результаты поиска — используй их для ответа.
-Давай конкретные адреса, телефоны и названия без лишних оговорок.
-Будь конкретным и полезным. Используй эмодзи где уместно.""",
+Если тебе предоставлены результаты поиска — используй их.
+Давай конкретные ответы. Используй эмодзи где уместно.""",
         messages=messages
     )
     assistant_message = response.content[0].text
@@ -192,7 +228,10 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     os.remove(voice_path)
 
 def main():
+    global bot_instance
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+    bot_instance = app.bot
+    scheduler.start()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
