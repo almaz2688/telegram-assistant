@@ -39,6 +39,25 @@ async def needs_search(text):
     )
     return response.content[0].text.strip().upper() == "YES"
 
+async def needs_image(text):
+    response = anthropic_client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=10,
+        system="Ты определяешь нужно ли генерировать картинку. Отвечай только YES или NO. YES если просят нарисовать, создать изображение, сгенерировать картинку, визуализировать.",
+        messages=[{"role": "user", "content": text}]
+    )
+    return response.content[0].text.strip().upper() == "YES"
+
+async def generate_image(prompt):
+    response = openai_client.images.generate(
+        model="dall-e-3",
+        prompt=prompt,
+        size="1024x1024",
+        quality="standard",
+        n=1,
+    )
+    return response.data[0].url
+
 async def text_to_voice(text, file_path):
     clean_text = text.replace("**", "").replace("##", "").replace("#", "").replace("*", "")
     response = openai_client.audio.speech.create(
@@ -55,6 +74,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎙 Принимать голосовые сообщения\n"
         "🔍 Искать информацию в интернете\n"
         "🖼 Анализировать фотографии\n"
+        "🎨 Генерировать картинки\n"
         "🔊 Отвечать голосом\n\n"
         "Пиши, говори или отправляй фото!"
     )
@@ -127,10 +147,21 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if user_id not in conversation_history:
         conversation_history[user_id] = []
     await update.message.reply_text("⏳ Думаю...")
+
+    if await needs_image(text):
+        await update.message.reply_text("🎨 Генерирую картинку...")
+        try:
+            image_url = await generate_image(text)
+            await update.message.reply_photo(photo=image_url, caption="Вот твоя картинка! 🎨")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка генерации: {str(e)}")
+        return
+
     search_result = ""
     if await needs_search(text):
         await update.message.reply_text("🔍 Ищу в интернете...")
         search_result = await search_web(text)
+
     messages = conversation_history[user_id].copy()
     user_content = text
     if search_result:
@@ -138,6 +169,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     messages.append({"role": "user", "content": user_content})
     if len(messages) > 20:
         messages = messages[-20:]
+
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=2048,
@@ -151,6 +183,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     conversation_history[user_id].append({"role": "user", "content": text})
     conversation_history[user_id].append({"role": "assistant", "content": assistant_message})
     await update.message.reply_text(assistant_message)
+
     os.makedirs("voice_files", exist_ok=True)
     voice_path = f"voice_files/response_{user_id}.mp3"
     await text_to_voice(assistant_message, voice_path)
