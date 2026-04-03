@@ -38,10 +38,20 @@ async def needs_search(text):
     )
     return response.content[0].text.strip().upper() == "YES"
 
+async def text_to_voice(text, file_path):
+    clean_text = text.replace("**", "").replace("##", "").replace("#", "").replace("*", "")
+    response = openai_client.audio.speech.create(
+        model="tts-1",
+        voice="nova",
+        input=clean_text[:4000]
+    )
+    response.stream_to_file(file_path)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я твой личный помощник 🤖\n\n"
         "Могу искать информацию в интернете, 2ГИС, Яндекс картах.\n"
+        "Отвечаю текстом и голосом!\n"
         "Пиши текстом или отправляй голосовые сообщения!"
     )
 
@@ -107,6 +117,13 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     conversation_history[user_id].append({"role": "assistant", "content": assistant_message})
 
     await update.message.reply_text(assistant_message)
+
+    os.makedirs("voice_files", exist_ok=True)
+    voice_path = f"voice_files/response_{user_id}.mp3"
+    await text_to_voice(assistant_message, voice_path)
+    with open(voice_path, "rb") as voice_file:
+        await update.message.reply_voice(voice=voice_file)
+    os.remove(voice_path)
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
