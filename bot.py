@@ -1,7 +1,6 @@
 import os
 import base64
 import anthropic
-import asyncio
 import json
 from datetime import datetime
 from openai import OpenAI
@@ -150,6 +149,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     assistant_message = response.content[0].text
     await update.message.reply_text(assistant_message)
+    os.makedirs("voice_files", exist_ok=True)
     voice_path = f"voice_files/response_{update.message.from_user.id}.mp3"
     await text_to_voice(assistant_message, voice_path)
     with open(voice_path, "rb") as voice_file:
@@ -231,11 +231,15 @@ def main():
     global bot_instance
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     bot_instance = app.bot
-    scheduler.start()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    async def start_scheduler(application):
+        scheduler.start()
+
+    app.post_init = start_scheduler
     print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
     app.run_polling()
 
