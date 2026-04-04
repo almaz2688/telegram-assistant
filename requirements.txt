@@ -3,7 +3,7 @@ openai
 anthropic
 python-dotenv
 tavily-python
-APScheduler
+apscheduler
 pytz
 google-auth-oauthlib
 google-auth-httplib2
