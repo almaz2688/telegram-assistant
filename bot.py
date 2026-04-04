@@ -2,7 +2,7 @@ import os
 import base64
 import anthropic
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 from dotenv import load_dotenv
 from telegram import Update, Bot
@@ -34,8 +34,7 @@ def get_calendar_service():
     if not GOOGLE_CREDENTIALS:
         return None
     try:
-       import base64 as b64
-creds_data = json.loads(b64.b64decode(GOOGLE_CREDENTIALS).decode())
+        creds_data = json.loads(base64.b64decode(GOOGLE_CREDENTIALS).decode())
         creds = Credentials(
             token=creds_data.get("token"),
             refresh_token=creds_data.get("refresh_token"),
@@ -49,7 +48,7 @@ creds_data = json.loads(b64.b64decode(GOOGLE_CREDENTIALS).decode())
         print(f"Calendar error: {e}")
         return None
 
-async def create_calendar_event(title, start_datetime, end_datetime=None, reminder_minutes=60):
+async def create_calendar_event(title, start_datetime, reminder_minutes=60):
     service = get_calendar_service()
     if not service:
         return "❌ Google Calendar не подключён"
@@ -59,11 +58,7 @@ async def create_calendar_event(title, start_datetime, end_datetime=None, remind
             start_dt = tz.localize(datetime.strptime(start_datetime, "%Y-%m-%d %H:%M"))
         else:
             start_dt = start_datetime
-        if end_datetime is None:
-            from datetime import timedelta
-            end_dt = start_dt + timedelta(hours=1)
-        else:
-            end_dt = end_datetime
+        end_dt = start_dt + timedelta(hours=1)
         event = {
             "summary": title,
             "start": {"dateTime": start_dt.isoformat(), "timeZone": "Europe/Moscow"},
@@ -117,7 +112,7 @@ async def parse_action(text):
         model="claude-opus-4-5",
         max_tokens=300,
         system=f"""Ты определяешь действие из текста. Текущее время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M')}
-        
+
 Если просят добавить событие в календарь — верни JSON:
 {{"action": "calendar", "title": "название события", "datetime": "YYYY-MM-DD HH:MM", "reminder_minutes": 60}}
 
