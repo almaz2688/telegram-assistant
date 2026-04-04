@@ -93,7 +93,9 @@ async def needs_search(text):
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=10,
-        system="Ты определяешь нужен ли поиск в интернете. Отвечай только YES или NO.",
+        system="""Отвечай только YES или NO.
+NO только если это: приветствие, простая математика, личный разговор, просьба написать текст или создать что-то.
+В остальных случаях — YES.""",
         messages=[{"role": "user", "content": text}]
     )
     return response.content[0].text.strip().upper() == "YES"
@@ -277,9 +279,10 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=2048,
-        system="""Ты личный помощник. Отвечай на русском языке.
-Если тебе предоставлены результаты поиска — используй их.
-Давай конкретные ответы. Используй эмодзи где уместно.""",
+        system=f"""Ты личный помощник. Отвечай на русском языке.
+Сегодняшняя дата: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%d.%m.%Y')}.
+Если тебе предоставлены результаты поиска — используй их и доверяй им.
+Давай конкретные ответы без лишних оговорок. Используй эмодзи где уместно.""",
         messages=messages
     )
     assistant_message = response.content[0].text
@@ -305,10 +308,3 @@ def main():
 
     async def start_scheduler(application):
         scheduler.start()
-
-    app.post_init = start_scheduler
-    print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
