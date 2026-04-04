@@ -308,3 +308,10 @@ def main():
 
     async def start_scheduler(application):
         scheduler.start()
+
+    app.post_init = start_scheduler
+    print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
