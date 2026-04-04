@@ -76,6 +76,61 @@ async def create_calendar_event(title, start_datetime, reminder_minutes=60):
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
 
+async def delete_calendar_event(title, date):
+    service = get_calendar_service()
+    if not service:
+        return "❌ Google Calendar не подключён"
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        date_dt = datetime.strptime(date, "%Y-%m-%d")
+        time_min = tz.localize(date_dt).isoformat()
+        time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
+        events = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            q=title
+        ).execute()
+        items = events.get("items", [])
+        if not items:
+            return f"❌ Событие не найдено: {title} на {date}"
+        for item in items:
+            service.events().delete(calendarId="primary", eventId=item["id"]).execute()
+        return f"✅ Событие удалено: {title}"
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
+
+async def list_calendar_events(date):
+    service = get_calendar_service()
+    if not service:
+        return "❌ Google Calendar не подключён"
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        date_dt = datetime.strptime(date, "%Y-%m-%d")
+        time_min = tz.localize(date_dt).isoformat()
+        time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
+        events = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+        items = events.get("items", [])
+        if not items:
+            return f"📅 На {date_dt.strftime('%d.%m.%Y')} событий нет"
+        result = f"📅 События на {date_dt.strftime('%d.%m.%Y')}:\n\n"
+        for item in items:
+            start = item["start"].get("dateTime", item["start"].get("date"))
+            if "T" in start:
+                start_time = datetime.fromisoformat(start).strftime("%H:%M")
+            else:
+                start_time = "весь день"
+            result += f"⏰ {start_time} — {item['summary']}\n"
+        return result
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
+
 async def send_reminder(chat_id, text):
     await bot_instance.send_message(chat_id=chat_id, text=f"⏰ Напоминание: {text}")
 
@@ -117,6 +172,12 @@ async def parse_action(text):
 
 Если просят добавить событие в календарь — верни JSON:
 {{"action": "calendar", "title": "название события", "datetime": "YYYY-MM-DD HH:MM", "reminder_minutes": 60}}
+
+Если просят удалить событие из календаря — верни JSON:
+{{"action": "delete_calendar", "title": "название события", "date": "YYYY-MM-DD"}}
+
+Если просят показать события календаря на дату — верни JSON:
+{{"action": "list_calendar", "date": "YYYY-MM-DD"}}
 
 Если просят поставить напоминание — верни JSON:
 {{"action": "reminder", "datetime": "YYYY-MM-DD HH:MM", "text": "текст напоминания"}}
@@ -160,9 +221,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🖼 Анализировать фотографии\n"
         "🎨 Генерировать картинки\n"
         "⏰ Ставить напоминания\n"
-        "📅 Добавлять события в Google Calendar\n"
+        "📅 Добавлять/удалять события в Google Calendar\n"
         "🔊 Отвечать голосом\n\n"
-        "Пример: 'добавь в календарь встречу с остеопатом 9 апреля в 10:00, напомни за день'"
+        "Пример: 'добавь в календарь встречу с остеопатом 9 апреля в 10:00'"
     )
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -236,6 +297,21 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             start_datetime=action_data["datetime"],
             reminder_minutes=action_data.get("reminder_minutes", 60)
         )
+        await update.message.reply_text(result)
+        return
+
+    if action_data.get("action") == "delete_calendar":
+        await update.message.reply_text("🗑 Удаляю из Google Calendar...")
+        result = await delete_calendar_event(
+            title=action_data["title"],
+            date=action_data["date"]
+        )
+        await update.message.reply_text(result)
+        return
+
+    if action_data.get("action") == "list_calendar":
+        await update.message.reply_text("📅 Смотрю календарь...")
+        result = await list_calendar_events(date=action_data["date"])
         await update.message.reply_text(result)
         return
 
