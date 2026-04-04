@@ -34,7 +34,8 @@ def get_calendar_service():
     if not GOOGLE_CREDENTIALS:
         return None
     try:
-        creds_data = json.loads(GOOGLE_CREDENTIALS)
+       import base64 as b64
+creds_data = json.loads(b64.b64decode(GOOGLE_CREDENTIALS).decode())
         creds = Credentials(
             token=creds_data.get("token"),
             refresh_token=creds_data.get("refresh_token"),
