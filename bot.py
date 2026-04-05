@@ -2,6 +2,7 @@ import os
 import base64
 import anthropic
 import json
+import sqlite3
 from datetime import datetime, timedelta
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -27,8 +28,44 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
 
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
-conversation_history = {}
 bot_instance = None
+
+def init_db():
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            role TEXT,
+            content TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_message(user_id, role, content):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO messages (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
+    conn.commit()
+    conn.close()
+
+def get_history(user_id, limit=20):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT role, content FROM messages WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit))
+    rows = c.fetchall()
+    conn.close()
+    return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+
+def clear_history(user_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM messages WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
 
 def get_calendar_service():
     if not GOOGLE_CREDENTIALS:
@@ -221,10 +258,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🖼 Анализировать фотографии\n"
         "🎨 Генерировать картинки\n"
         "⏰ Ставить напоминания\n"
-        "📅 Добавлять/удалять события в Google Calendar\n"
+        "📅 Управлять Google Calendar\n"
+        "🧠 Помню все наши разговоры\n"
         "🔊 Отвечать голосом\n\n"
-        "Пример: 'добавь в календарь встречу с остеопатом 9 апреля в 10:00'"
+        "Напиши /forget чтобы очистить историю"
     )
+
+async def forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    clear_history(user_id)
+    await update.message.reply_text("🧹 История разговора очищена!")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎙 Слушаю...")
@@ -234,7 +277,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = f"voice_files/{voice.file_id}.ogg"
     await file.download_to_drive(file_path)
     with open(file_path, "rb") as audio_file:
-        transcript = openai_client.audio.transcriptions.create(
+transcript = openai_client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             language="ru"
@@ -282,9 +325,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     user_id = update.message.from_user.id
     chat_id = update.message.chat_id
-
-    if user_id not in conversation_history:
-        conversation_history[user_id] = []
 
     await update.message.reply_text("⏳ Думаю...")
 
@@ -344,13 +384,11 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         await update.message.reply_text("🔍 Ищу в интернете...")
         search_result = await search_web(text)
 
-    messages = conversation_history[user_id].copy()
+    history = get_history(user_id)
     user_content = text
     if search_result:
         user_content = f"{text}\n\nРезультаты поиска:\n{search_result}"
-    messages.append({"role": "user", "content": user_content})
-    if len(messages) > 20:
-        messages = messages[-20:]
+    history.append({"role": "user", "content": user_content})
 
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
@@ -359,11 +397,13 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 Сегодняшняя дата: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%d.%m.%Y')}.
 Если тебе предоставлены результаты поиска — используй их и доверяй им.
 Давай конкретные ответы без лишних оговорок. Используй эмодзи где уместно.""",
-        messages=messages
+        messages=history
     )
     assistant_message = response.content[0].text
-    conversation_history[user_id].append({"role": "user", "content": text})
-    conversation_history[user_id].append({"role": "assistant", "content": assistant_message})
+
+    save_message(user_id, "user", text)
+    save_message(user_id, "assistant", assistant_message)
+
     await update.message.reply_text(assistant_message)
 
     os.makedirs("voice_files", exist_ok=True)
@@ -375,9 +415,11 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
 def main():
     global bot_instance
+    init_db()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     bot_instance = app.bot
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("forget", forget))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
