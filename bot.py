@@ -42,6 +42,15 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS shopping_list (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            item TEXT,
+            done INTEGER DEFAULT 0,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -64,6 +73,36 @@ def clear_history(user_id):
     conn = sqlite3.connect("memory.db")
     c = conn.cursor()
     c.execute("DELETE FROM messages WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def add_shopping_items(user_id, items):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    for item in items:
+        c.execute("INSERT INTO shopping_list (user_id, item) VALUES (?, ?)", (user_id, item.strip()))
+    conn.commit()
+    conn.close()
+
+def get_shopping_list(user_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT item FROM shopping_list WHERE user_id=? AND done=0 ORDER BY id", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+def delete_shopping_item(user_id, item):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM shopping_list WHERE user_id=? AND item LIKE ?", (user_id, f"%{item}%"))
+    conn.commit()
+    conn.close()
+
+def clear_shopping_list(user_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM shopping_list WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
 
@@ -219,6 +258,18 @@ async def parse_action(text):
 Если просят поставить напоминание — верни JSON:
 {{"action": "reminder", "datetime": "YYYY-MM-DD HH:MM", "text": "текст напоминания"}}
 
+Если просят добавить в список покупок — верни JSON:
+{{"action": "shopping_add", "items": ["товар1", "товар2"]}}
+
+Если просят показать список покупок — верни JSON:
+{{"action": "shopping_list"}}
+
+Если просят удалить товар из списка покупок — верни JSON:
+{{"action": "shopping_delete", "item": "название товара"}}
+
+Если просят очистить список покупок — верни JSON:
+{{"action": "shopping_clear"}}
+
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
 
@@ -259,6 +310,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎨 Генерировать картинки\n"
         "⏰ Ставить напоминания\n"
         "📅 Управлять Google Calendar\n"
+        "🛒 Вести список покупок\n"
         "🧠 Помню все наши разговоры\n"
         "🔊 Отвечать голосом\n\n"
         "Напиши /forget чтобы очистить историю"
@@ -369,6 +421,30 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return
+
+    if action_data.get("action") == "shopping_add":
+        items = action_data.get("items", [])
+        add_shopping_items(user_id, items)
+        await update.message.reply_text(f"✅ Добавлено в список покупок:\n" + "\n".join(f"• {i}" for i in items))
+        return
+
+    if action_data.get("action") == "shopping_list":
+        items = get_shopping_list(user_id)
+        if not items:
+            await update.message.reply_text("🛒 Список покупок пуст")
+        else:
+            await update.message.reply_text("🛒 Список покупок:\n\n" + "\n".join(f"• {i}" for i in items))
+        return
+
+    if action_data.get("action") == "shopping_delete":
+        delete_shopping_item(user_id, action_data["item"])
+        await update.message.reply_text(f"✅ Удалено из списка: {action_data['item']}")
+        return
+
+    if action_data.get("action") == "shopping_clear":
+        clear_shopping_list(user_id)
+        await update.message.reply_text("✅ Список покупок очищен!")
+        return
 
     if await needs_image(text):
         await update.message.reply_text("🎨 Генерирую картинку...")
