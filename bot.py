@@ -460,7 +460,7 @@ async def parse_action(text, user_id):
 {{"action": "contact_delete", "name": "имя"}}
 
 Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — верни JSON:
-{{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле"}}
+{{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле без приветствия"}
 
 Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
 {{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения", "datetime": "YYYY-MM-DD HH:MM"}}
