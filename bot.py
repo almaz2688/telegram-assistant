@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from openai import OpenAI
 from dotenv import load_dotenv
-from telegram import Update, Bot
+from telegram import Update, Bot, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from tavily import TavilyClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -268,7 +268,6 @@ async def send_telegram_userbot(username, message):
 async def send_scheduled_message(msg_id, username, message):
     await send_telegram_userbot(username, message)
     mark_scheduled_message_sent(msg_id)
-    print(f"Отложенное сообщение {msg_id} отправлено {username}")
 
 async def create_calendar_event(title, start_datetime, reminder_minutes=60):
     service = get_calendar_service()
@@ -397,7 +396,6 @@ async def parse_cron(text):
 - каждый понедельник в 10:00 → 0 10 * * 1
 - каждое 1 число месяца в 12:00 → 0 12 1 * *
 - каждую пятницу в 18:00 → 0 18 * * 5
-- каждый день в 8:30 → 30 8 * * *
 Верни ТОЛЬКО cron выражение, без пояснений.""",
         messages=[{"role": "user", "content": text}]
     )
@@ -428,7 +426,7 @@ async def parse_action(text, user_id):
 Если просят поставить ОДНОРАЗОВОЕ напоминание — верни JSON:
 {{"action": "reminder", "datetime": "YYYY-MM-DD HH:MM", "text": "текст напоминания"}}
 
-Если просят поставить ПОВТОРЯЮЩЕЕСЯ напоминание (каждый день/неделю/месяц) — верни JSON:
+Если просят поставить ПОВТОРЯЮЩЕЕСЯ напоминание — верни JSON:
 {{"action": "recurring_reminder", "text": "текст напоминания", "description": "описание расписания"}}
 
 Если просят показать повторяющиеся напоминания — верни JSON:
@@ -461,10 +459,10 @@ async def parse_action(text, user_id):
 Если просят удалить контакт — верни JSON:
 {{"action": "contact_delete", "name": "имя"}}
 
-Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — найди username в книге контактов и верни JSON:
+Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — верни JSON:
 {{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле"}}
 
-Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — найди username и верни JSON:
+Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
 {{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения", "datetime": "YYYY-MM-DD HH:MM"}}
 
 Если ничего из вышеперечисленного — верни:
@@ -500,20 +498,94 @@ async def text_to_voice(text, file_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! Я твой личный помощник 🤖\n\n"
-        "Умею:\n"
-        "🎙 Принимать голосовые сообщения\n"
-        "🔍 Искать информацию в интернете\n"
-        "🖼 Анализировать фотографии\n"
-        "🎨 Генерировать картинки\n"
-        "⏰ Ставить напоминания (разовые и повторяющиеся)\n"
-        "📅 Управлять Google Calendar\n"
-        "🛒 Вести список покупок\n"
-        "👥 Книга контактов\n"
-        "📨 Отправлять сообщения сейчас или по расписанию\n"
-        "🧠 Помню все наши разговоры\n"
-        "🔊 Отвечать голосом\n\n"
-        "Напиши /forget чтобы очистить историю"
+        "Быстрые команды:\n"
+        "/contact Имя @username телефон — добавить контакт\n"
+        "/contacts — все контакты\n"
+        "/shopping — список покупок\n"
+        "/reminders — повторяющиеся напоминания\n"
+        "/forget — очистить историю\n\n"
+        "Или просто говорите голосом что нужно сделать!"
     )
+
+async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Использование:\n"
+            "/contact Имя Фамилия @username телефон\n\n"
+            "Примеры:\n"
+            "/contact Вася Петров @vasya 89991234567\n"
+            "/contact Вася Петров @vasya\n"
+            "/contact Вася Петров 89991234567"
+        )
+        return
+
+    name_parts = []
+    username = None
+    phone = None
+
+    for arg in args:
+        if arg.startswith("@"):
+            username = arg
+        elif arg.startswith("8") and len(arg) >= 10 and arg[1:].isdigit():
+            phone = arg
+        elif arg.startswith("+7") and len(arg) >= 11:
+            phone = arg
+        else:
+            name_parts.append(arg)
+
+    name = " ".join(name_parts) if name_parts else None
+
+    if not name:
+        await update.message.reply_text("❌ Укажите имя контакта")
+        return
+
+    save_contact(user_id, name, username, phone)
+    result = f"✅ Контакт сохранён: {name}"
+    if username:
+        result += f"\nTelegram: {username}"
+    if phone:
+        result += f"\nТелефон: {phone}"
+    await update.message.reply_text(result)
+
+async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    contacts = get_all_contacts(user_id)
+    if not contacts:
+        await update.message.reply_text("👥 Книга контактов пуста\n\nДобавьте: /contact Имя @username")
+        return
+    result = "👥 Ваши контакты:\n\n"
+    for c in contacts:
+        result += f"👤 {c['name']}\n"
+        if c['username']:
+            result += f"   Telegram: {c['username']}\n"
+        if c['phone']:
+            result += f"   Телефон: {c['phone']}\n"
+        if c['notes']:
+            result += f"   Заметки: {c['notes']}\n"
+        result += "\n"
+    await update.message.reply_text(result)
+
+async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    items = get_shopping_list(user_id)
+    if not items:
+        await update.message.reply_text("🛒 Список покупок пуст\n\nДобавьте голосом или текстом: добавь молоко в список покупок")
+        return
+    await update.message.reply_text("🛒 Список покупок:\n\n" + "\n".join(f"• {i}" for i in items))
+
+async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    reminders = get_recurring_reminders(user_id)
+    if not reminders:
+        await update.message.reply_text("⏰ Повторяющихся напоминаний нет")
+        return
+    result = "⏰ Повторяющиеся напоминания:\n\n"
+    for r in reminders:
+        result += f"#{r['id']} — {r['description']}\n📝 {r['text']}\n\n"
+    result += "Для удаления скажите: удали напоминание #номер"
+    await update.message.reply_text(result)
 
 async def forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -644,7 +716,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 args=[chat_id, action_data["text"]],
                 id=f"recurring_{reminder_id}"
             )
-            await update.message.reply_text(f"✅ Повторяющееся напоминание установлено!\n📅 {action_data['description']}\n📝 {action_data['text']}\n\nID: {reminder_id} (для удаления)")
+            await update.message.reply_text(f"✅ Повторяющееся напоминание установлено!\n📅 {action_data['description']}\n📝 {action_data['text']}\n\nID: {reminder_id}")
             return
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
@@ -748,7 +820,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         username = action_data.get("username")
         message = action_data.get("message")
         if not username:
-            await update.message.reply_text("❌ Не найден username контакта — добавьте его в книгу контактов")
+            await update.message.reply_text("❌ Не найден username — добавьте контакт через /contact")
             return
         await update.message.reply_text(f"📨 Отправляю сообщение {username}...")
         result = await send_telegram_userbot(username, message)
@@ -760,7 +832,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         message = action_data.get("message")
         send_at = action_data.get("datetime")
         if not username:
-            await update.message.reply_text("❌ Не найден username контакта — добавьте его в книгу контактов")
+            await update.message.reply_text("❌ Не найден username — добавьте контакт через /contact")
             return
         try:
             tz = pytz.timezone("Europe/Moscow")
@@ -828,6 +900,10 @@ def main():
     bot_instance = app.bot
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("forget", forget))
+    app.add_handler(CommandHandler("contact", cmd_contact))
+    app.add_handler(CommandHandler("contacts", cmd_contacts))
+    app.add_handler(CommandHandler("shopping", cmd_shopping))
+    app.add_handler(CommandHandler("reminders", cmd_reminders))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
@@ -854,9 +930,20 @@ def main():
             except Exception as e:
                 print(f"Error loading reminder {reminder_id}: {e}")
 
-    app.post_init = start_scheduler
+    async def set_commands(application):
+        await application.bot.set_my_commands([
+            BotCommand("start", "Главное меню"),
+            BotCommand("contact", "Добавить контакт"),
+            BotCommand("contacts", "Все контакты"),
+            BotCommand("shopping", "Список покупок"),
+            BotCommand("reminders", "Повторяющиеся напоминания"),
+            BotCommand("forget", "Очистить историю"),
+        ])
+
+    app.post_init = lambda app: asyncio.gather(start_scheduler(app), set_commands(app))
     print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
     app.run_polling()
 
 if __name__ == "__main__":
+    import asyncio
     main()
