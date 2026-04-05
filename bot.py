@@ -463,10 +463,10 @@ async def parse_action(text, user_id):
 {{"action": "contact_delete", "name": "имя"}}
 
 Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — верни JSON:
-{{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле без приветствия"}}
+{{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс"}}
 
 Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
-{{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения без приветствия", "datetime": "YYYY-MM-DD HH:MM"}}
+{{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс", "datetime": "YYYY-MM-DD HH:MM"}}
 
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
@@ -911,7 +911,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    async def start_scheduler(application):
+    async def on_startup(application):
         scheduler.start()
         for row in get_all_recurring_reminders():
             reminder_id, user_id, chat_id, text, cron = row
@@ -932,8 +932,6 @@ def main():
                 )
             except Exception as e:
                 print(f"Error loading reminder {reminder_id}: {e}")
-
-    async def set_commands(application):
         await application.bot.set_my_commands([
             BotCommand("start", "Главное меню"),
             BotCommand("contact", "Добавить контакт"),
@@ -942,10 +940,6 @@ def main():
             BotCommand("reminders", "Повторяющиеся напоминания"),
             BotCommand("forget", "Очистить историю"),
         ])
-
-    async def on_startup(application):
-        await start_scheduler(application)
-        await set_commands(application)
 
     app.post_init = on_startup
     print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
