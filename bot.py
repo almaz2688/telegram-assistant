@@ -17,6 +17,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.tl.functions.contacts import ImportContactsRequest
+from telethon.tl.types import InputPhoneContact
 
 load_dotenv()
 
@@ -256,20 +258,59 @@ def get_calendar_service():
         print(f"Calendar error: {e}")
         return None
 
-async def send_telegram_userbot(username, message):
+async def find_recipient(client, contact):
+    """Ищет получателя по username, телефону или имени в диалогах"""
+    # 1. По username
+    if contact.get("username"):
+        return contact["username"]
+
+    # 2. По телефону
+    if contact.get("phone"):
+        try:
+            phone = contact["phone"]
+            result = await client(ImportContactsRequest([
+                InputPhoneContact(client_id=0, phone=phone, first_name=contact["name"], last_name="")
+            ]))
+            if result.users:
+                return result.users[0]
+        except Exception as e:
+            print(f"Phone lookup error: {e}")
+
+    # 3. По имени в диалогах
+    if contact.get("name"):
+        try:
+            name_lower = contact["name"].lower()
+            async for dialog in client.iter_dialogs():
+                if dialog.name and name_lower.split()[0] in dialog.name.lower():
+                    return dialog.entity
+        except Exception as e:
+            print(f"Dialog lookup error: {e}")
+
+    return None
+
+async def send_telegram_userbot(contact_info, message):
+    """contact_info — словарь с name, username, phone"""
     try:
         client = TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
+            await client.disconnect()
             return "❌ UserBot не авторизован"
-        await client.send_message(username, message)
+
+        recipient = await find_recipient(client, contact_info)
+
+        if recipient is None:
+            await client.disconnect()
+            return f"❌ Не удалось найти {contact_info.get('name')} в Telegram"
+
+        await client.send_message(recipient, message)
         await client.disconnect()
-        return f"✅ Сообщение отправлено {username}"
+        return f"✅ Сообщение отправлено {contact_info.get('name')}"
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
 
-async def send_scheduled_message(msg_id, username, message):
-    await send_telegram_userbot(username, message)
+async def send_scheduled_message(msg_id, contact_info, message):
+    await send_telegram_userbot(contact_info, message)
     mark_scheduled_message_sent(msg_id)
 
 async def create_calendar_event(title, start_datetime, reminder_minutes=60):
@@ -462,11 +503,11 @@ async def parse_action(text, user_id):
 Если просят удалить контакт — верни JSON:
 {{"action": "contact_delete", "name": "имя"}}
 
-Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — верни JSON:
-{{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс"}}
+Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — найди контакт в книге и верни JSON:
+{{"action": "send_telegram", "contact_name": "имя из книги контактов", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс"}}
 
 Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
-{{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс", "datetime": "YYYY-MM-DD HH:MM"}}
+{{"action": "send_telegram_scheduled", "contact_name": "имя из книги контактов", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс", "datetime": "YYYY-MM-DD HH:MM"}}
 
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
@@ -574,7 +615,7 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     items = get_shopping_list(user_id)
     if not items:
-        await update.message.reply_text("🛒 Список покупок пуст\n\nДобавьте: добавь молоко в список покупок")
+        await update.message.reply_text("🛒 Список покупок пуст")
         return
     await update.message.reply_text("🛒 Список покупок:\n\n" + "\n".join(f"• {i}" for i in items))
 
@@ -820,34 +861,36 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         return
 
     if action_data.get("action") == "send_telegram":
-        username = action_data.get("username")
+        contact_name = action_data.get("contact_name")
         message = action_data.get("message")
-        if not username:
-            await update.message.reply_text("❌ Не найден username — добавьте контакт через /contact")
+        contact = find_contact(user_id, contact_name)
+        if not contact:
+            await update.message.reply_text(f"❌ Контакт не найден: {contact_name}\nДобавьте через /contact")
             return
-        await update.message.reply_text(f"📨 Отправляю сообщение {username}...")
-        result = await send_telegram_userbot(username, message)
+        await update.message.reply_text(f"📨 Отправляю сообщение {contact['name']}...")
+        result = await send_telegram_userbot(contact, message)
         await update.message.reply_text(f"{result}\n\n📝 Текст:\n{message}")
         return
 
     if action_data.get("action") == "send_telegram_scheduled":
-        username = action_data.get("username")
+        contact_name = action_data.get("contact_name")
         message = action_data.get("message")
         send_at = action_data.get("datetime")
-        if not username:
-            await update.message.reply_text("❌ Не найден username — добавьте контакт через /contact")
+        contact = find_contact(user_id, contact_name)
+        if not contact:
+            await update.message.reply_text(f"❌ Контакт не найден: {contact_name}\nДобавьте через /contact")
             return
         try:
             tz = pytz.timezone("Europe/Moscow")
             send_time = tz.localize(datetime.strptime(send_at, "%Y-%m-%d %H:%M"))
-            msg_id = save_scheduled_message(user_id, username, message, send_at)
+            msg_id = save_scheduled_message(user_id, contact_name, message, send_at)
             scheduler.add_job(
                 send_scheduled_message,
                 trigger=DateTrigger(run_date=send_time),
-                args=[msg_id, username, message],
+                args=[msg_id, contact, message],
                 id=f"scheduled_msg_{msg_id}"
             )
-            await update.message.reply_text(f"✅ Сообщение запланировано!\n📨 Кому: {username}\n⏰ Когда: {send_at}\n📝 Текст:\n{message}")
+            await update.message.reply_text(f"✅ Сообщение запланировано!\n📨 Кому: {contact['name']}\n⏰ Когда: {send_at}\n📝 Текст:\n{message}")
             return
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
