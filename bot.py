@@ -277,7 +277,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = f"voice_files/{voice.file_id}.ogg"
     await file.download_to_drive(file_path)
     with open(file_path, "rb") as audio_file:
-transcript = openai_client.audio.transcriptions.create(
+        transcript = openai_client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
             language="ru"
