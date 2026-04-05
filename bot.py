@@ -26,6 +26,7 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID"))
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
+TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION")
 
 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -130,10 +131,10 @@ def get_calendar_service():
 
 async def send_telegram_userbot(username, message):
     try:
-        client = TelegramClient('my_session', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        client = TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
-            return "❌ UserBot не авторизован — запустите userbot.py на Mac"
+            return "❌ UserBot не авторизован"
         await client.send_message(username, message)
         await client.disconnect()
         return f"✅ Сообщение отправлено {username}"
