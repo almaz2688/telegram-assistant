@@ -56,6 +56,17 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            name TEXT,
+            username TEXT,
+            phone TEXT,
+            notes TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -108,6 +119,46 @@ def clear_shopping_list(user_id):
     conn = sqlite3.connect("memory.db")
     c = conn.cursor()
     c.execute("DELETE FROM shopping_list WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def save_contact(user_id, name, username=None, phone=None, notes=None):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT id FROM contacts WHERE user_id=? AND name LIKE ?", (user_id, f"%{name}%"))
+    existing = c.fetchone()
+    if existing:
+        c.execute("UPDATE contacts SET username=?, phone=?, notes=? WHERE id=?",
+                  (username, phone, notes, existing[0]))
+    else:
+        c.execute("INSERT INTO contacts (user_id, name, username, phone, notes) VALUES (?, ?, ?, ?, ?)",
+                  (user_id, name, username, phone, notes))
+    conn.commit()
+    conn.close()
+
+def find_contact(user_id, name):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT name, username, phone, notes FROM contacts WHERE user_id=? AND name LIKE ?",
+              (user_id, f"%{name}%"))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {"name": row[0], "username": row[1], "phone": row[2], "notes": row[3]}
+    return None
+
+def get_all_contacts(user_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT name, username, phone, notes FROM contacts WHERE user_id=? ORDER BY name", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [{"name": r[0], "username": r[1], "phone": r[2], "notes": r[3]} for r in rows]
+
+def delete_contact(user_id, name):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM contacts WHERE user_id=? AND name LIKE ?", (user_id, f"%{name}%"))
     conn.commit()
     conn.close()
 
@@ -257,11 +308,18 @@ async def needs_image(text):
     )
     return response.content[0].text.strip().upper() == "YES"
 
-async def parse_action(text):
+async def parse_action(text, user_id):
+    contacts = get_all_contacts(user_id)
+    contacts_info = ""
+    if contacts:
+        contacts_info = "\n\nКнига контактов пользователя:\n"
+        for c in contacts:
+            contacts_info += f"- {c['name']}: username={c['username']}, телефон={c['phone']}\n"
+
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=400,
-        system=f"""Ты определяешь действие из текста. Текущее время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M')}
+        system=f"""Ты определяешь действие из текста. Текущее время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M')}{contacts_info}
 
 Если просят добавить событие в календарь — верни JSON:
 {{"action": "calendar", "title": "название события", "datetime": "YYYY-MM-DD HH:MM", "reminder_minutes": 60}}
@@ -287,7 +345,19 @@ async def parse_action(text):
 Если просят очистить список покупок — верни JSON:
 {{"action": "shopping_clear"}}
 
-Если просят написать сообщение кому-то в Telegram — верни JSON:
+Если просят сохранить контакт — верни JSON:
+{{"action": "contact_save", "name": "Имя Фамилия", "username": "@username", "phone": "номер", "notes": "заметки"}}
+
+Если просят показать контакты — верни JSON:
+{{"action": "contact_list"}}
+
+Если просят найти контакт — верни JSON:
+{{"action": "contact_find", "name": "имя"}}
+
+Если просят удалить контакт — верни JSON:
+{{"action": "contact_delete", "name": "имя"}}
+
+Если просят написать сообщение кому-то — найди username в книге контактов и верни JSON:
 {{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле"}}
 
 Если ничего из вышеперечисленного — верни:
@@ -331,6 +401,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⏰ Ставить напоминания\n"
         "📅 Управлять Google Calendar\n"
         "🛒 Вести список покупок\n"
+        "👥 Книга контактов\n"
         "📨 Отправлять сообщения в Telegram\n"
         "🧠 Помню все наши разговоры\n"
         "🔊 Отвечать голосом\n\n"
@@ -401,7 +472,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     await update.message.reply_text("⏳ Думаю...")
 
-    action_data = await parse_action(text)
+    action_data = await parse_action(text, user_id)
 
     if action_data.get("action") == "calendar":
         await update.message.reply_text("📅 Добавляю в Google Calendar...")
@@ -467,9 +538,61 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         await update.message.reply_text("✅ Список покупок очищен!")
         return
 
+    if action_data.get("action") == "contact_save":
+        save_contact(
+            user_id,
+            name=action_data.get("name"),
+            username=action_data.get("username"),
+            phone=action_data.get("phone"),
+            notes=action_data.get("notes")
+        )
+        await update.message.reply_text(f"✅ Контакт сохранён: {action_data.get('name')}")
+        return
+
+    if action_data.get("action") == "contact_list":
+        contacts = get_all_contacts(user_id)
+        if not contacts:
+            await update.message.reply_text("👥 Книга контактов пуста")
+        else:
+            result = "👥 Ваши контакты:\n\n"
+            for c in contacts:
+                result += f"👤 {c['name']}\n"
+                if c['username']:
+                    result += f"   Telegram: {c['username']}\n"
+                if c['phone']:
+                    result += f"   Телефон: {c['phone']}\n"
+                if c['notes']:
+                    result += f"   Заметки: {c['notes']}\n"
+                result += "\n"
+            await update.message.reply_text(result)
+        return
+
+    if action_data.get("action") == "contact_find":
+        contact = find_contact(user_id, action_data.get("name"))
+        if not contact:
+            await update.message.reply_text(f"❌ Контакт не найден: {action_data.get('name')}")
+        else:
+            result = f"👤 {contact['name']}\n"
+            if contact['username']:
+                result += f"Telegram: {contact['username']}\n"
+            if contact['phone']:
+                result += f"Телефон: {contact['phone']}\n"
+            if contact['notes']:
+                result += f"Заметки: {contact['notes']}\n"
+            await update.message.reply_text(result)
+        return
+
+    if action_data.get("action") == "contact_delete":
+        delete_contact(user_id, action_data.get("name"))
+        await update.message.reply_text(f"✅ Контакт удалён: {action_data.get('name')}")
+        return
+
     if action_data.get("action") == "send_telegram":
         username = action_data.get("username")
         message = action_data.get("message")
+        if not username:
+            await update.message.reply_text("❌ Не найден username контакта — добавьте его в книгу контактов")
+            return
         await update.message.reply_text(f"📨 Отправляю сообщение {username}...")
         result = await send_telegram_userbot(username, message)
         await update.message.reply_text(f"{result}\n\n📝 Текст:\n{message}")
