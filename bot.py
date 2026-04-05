@@ -11,6 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from tavily import TavilyClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.cron import CronTrigger
 import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -64,6 +65,17 @@ def init_db():
             username TEXT,
             phone TEXT,
             notes TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            chat_id INTEGER,
+            text TEXT,
+            cron TEXT,
+            description TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -159,6 +171,39 @@ def delete_contact(user_id, name):
     conn = sqlite3.connect("memory.db")
     c = conn.cursor()
     c.execute("DELETE FROM contacts WHERE user_id=? AND name LIKE ?", (user_id, f"%{name}%"))
+    conn.commit()
+    conn.close()
+
+def save_recurring_reminder(user_id, chat_id, text, cron, description):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO recurring_reminders (user_id, chat_id, text, cron, description) VALUES (?, ?, ?, ?, ?)",
+              (user_id, chat_id, text, cron, description))
+    reminder_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return reminder_id
+
+def get_recurring_reminders(user_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT id, text, cron, description FROM recurring_reminders WHERE user_id=?", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [{"id": r[0], "text": r[1], "cron": r[2], "description": r[3]} for r in rows]
+
+def get_all_recurring_reminders():
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("SELECT id, user_id, chat_id, text, cron FROM recurring_reminders")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_recurring_reminder(user_id, reminder_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM recurring_reminders WHERE user_id=? AND id=?", (user_id, reminder_id))
     conn.commit()
     conn.close()
 
@@ -308,6 +353,23 @@ async def needs_image(text):
     )
     return response.content[0].text.strip().upper() == "YES"
 
+async def parse_cron(text):
+    response = anthropic_client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=100,
+        system="""Преобразуй описание повторяющегося напоминания в cron выражение.
+Формат cron: минуты часы день_месяца месяц день_недели
+Примеры:
+- каждый день в 9:00 → 0 9 * * *
+- каждый понедельник в 10:00 → 0 10 * * 1
+- каждое 1 число месяца в 12:00 → 0 12 1 * *
+- каждую пятницу в 18:00 → 0 18 * * 5
+- каждый день в 8:30 → 30 8 * * *
+Верни ТОЛЬКО cron выражение, без пояснений.""",
+        messages=[{"role": "user", "content": text}]
+    )
+    return response.content[0].text.strip()
+
 async def parse_action(text, user_id):
     contacts = get_all_contacts(user_id)
     contacts_info = ""
@@ -330,8 +392,17 @@ async def parse_action(text, user_id):
 Если просят показать события календаря на дату — верни JSON:
 {{"action": "list_calendar", "date": "YYYY-MM-DD"}}
 
-Если просят поставить напоминание — верни JSON:
+Если просят поставить ОДНОРАЗОВОЕ напоминание — верни JSON:
 {{"action": "reminder", "datetime": "YYYY-MM-DD HH:MM", "text": "текст напоминания"}}
+
+Если просят поставить ПОВТОРЯЮЩЕЕСЯ напоминание (каждый день/неделю/месяц) — верни JSON:
+{{"action": "recurring_reminder", "text": "текст напоминания", "description": "описание расписания"}}
+
+Если просят показать повторяющиеся напоминания — верни JSON:
+{{"action": "recurring_list"}}
+
+Если просят удалить повторяющееся напоминание — верни JSON:
+{{"action": "recurring_delete", "id": номер}}
 
 Если просят добавить в список покупок — верни JSON:
 {{"action": "shopping_add", "items": ["товар1", "товар2"]}}
@@ -398,7 +469,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 Искать информацию в интернете\n"
         "🖼 Анализировать фотографии\n"
         "🎨 Генерировать картинки\n"
-        "⏰ Ставить напоминания\n"
+        "⏰ Ставить напоминания (разовые и повторяющиеся)\n"
         "📅 Управлять Google Calendar\n"
         "🛒 Вести список покупок\n"
         "👥 Книга контактов\n"
@@ -513,6 +584,56 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return
+
+    if action_data.get("action") == "recurring_reminder":
+        try:
+            cron = await parse_cron(action_data["description"])
+            reminder_id = save_recurring_reminder(
+                user_id, chat_id,
+                action_data["text"],
+                cron,
+                action_data["description"]
+            )
+            cron_parts = cron.split()
+            scheduler.add_job(
+                send_reminder,
+                trigger=CronTrigger(
+                    minute=cron_parts[0],
+                    hour=cron_parts[1],
+                    day=cron_parts[2],
+                    month=cron_parts[3],
+                    day_of_week=cron_parts[4],
+                    timezone="Europe/Moscow"
+                ),
+                args=[chat_id, action_data["text"]],
+                id=f"recurring_{reminder_id}"
+            )
+            await update.message.reply_text(f"✅ Повторяющееся напоминание установлено!\n📅 {action_data['description']}\n📝 {action_data['text']}\n\nID: {reminder_id} (для удаления)")
+            return
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            return
+
+    if action_data.get("action") == "recurring_list":
+        reminders = get_recurring_reminders(user_id)
+        if not reminders:
+            await update.message.reply_text("⏰ Повторяющихся напоминаний нет")
+        else:
+            result = "⏰ Повторяющиеся напоминания:\n\n"
+            for r in reminders:
+                result += f"#{r['id']} — {r['description']}\n📝 {r['text']}\n\n"
+            await update.message.reply_text(result)
+        return
+
+    if action_data.get("action") == "recurring_delete":
+        reminder_id = action_data.get("id")
+        delete_recurring_reminder(user_id, reminder_id)
+        try:
+            scheduler.remove_job(f"recurring_{reminder_id}")
+        except:
+            pass
+        await update.message.reply_text(f"✅ Напоминание #{reminder_id} удалено!")
+        return
 
     if action_data.get("action") == "shopping_add":
         items = action_data.get("items", [])
@@ -654,6 +775,25 @@ def main():
 
     async def start_scheduler(application):
         scheduler.start()
+        for row in get_all_recurring_reminders():
+            reminder_id, user_id, chat_id, text, cron = row
+            try:
+                cron_parts = cron.split()
+                scheduler.add_job(
+                    send_reminder,
+                    trigger=CronTrigger(
+                        minute=cron_parts[0],
+                        hour=cron_parts[1],
+                        day=cron_parts[2],
+                        month=cron_parts[3],
+                        day_of_week=cron_parts[4],
+                        timezone="Europe/Moscow"
+                    ),
+                    args=[chat_id, text],
+                    id=f"recurring_{reminder_id}"
+                )
+            except Exception as e:
+                print(f"Error loading reminder {reminder_id}: {e}")
 
     app.post_init = start_scheduler
     print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
