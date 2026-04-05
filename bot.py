@@ -36,8 +36,11 @@ tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 bot_instance = None
 
+DB_PATH = "/app/data/memory.db"
+
 def init_db():
-    conn = sqlite3.connect("memory.db")
+    os.makedirs("/app/data", exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -94,14 +97,14 @@ def init_db():
     conn.close()
 
 def save_message(user_id, role, content):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO messages (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
     conn.commit()
     conn.close()
 
 def get_history(user_id, limit=20):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT role, content FROM messages WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit))
     rows = c.fetchall()
@@ -109,14 +112,14 @@ def get_history(user_id, limit=20):
     return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
 
 def clear_history(user_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM messages WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
 
 def add_shopping_items(user_id, items):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     for item in items:
         c.execute("INSERT INTO shopping_list (user_id, item) VALUES (?, ?)", (user_id, item.strip()))
@@ -124,7 +127,7 @@ def add_shopping_items(user_id, items):
     conn.close()
 
 def get_shopping_list(user_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT item FROM shopping_list WHERE user_id=? AND done=0 ORDER BY id", (user_id,))
     rows = c.fetchall()
@@ -132,21 +135,21 @@ def get_shopping_list(user_id):
     return [row[0] for row in rows]
 
 def delete_shopping_item(user_id, item):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM shopping_list WHERE user_id=? AND item LIKE ?", (user_id, f"%{item}%"))
     conn.commit()
     conn.close()
 
 def clear_shopping_list(user_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM shopping_list WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
 
 def save_contact(user_id, name, username=None, phone=None, notes=None):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id FROM contacts WHERE user_id=? AND name LIKE ?", (user_id, f"%{name}%"))
     existing = c.fetchone()
@@ -160,7 +163,7 @@ def save_contact(user_id, name, username=None, phone=None, notes=None):
     conn.close()
 
 def find_contact(user_id, name):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT name, username, phone, notes FROM contacts WHERE user_id=? AND name LIKE ?",
               (user_id, f"%{name}%"))
@@ -171,7 +174,7 @@ def find_contact(user_id, name):
     return None
 
 def get_all_contacts(user_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT name, username, phone, notes FROM contacts WHERE user_id=? ORDER BY name", (user_id,))
     rows = c.fetchall()
@@ -179,14 +182,14 @@ def get_all_contacts(user_id):
     return [{"name": r[0], "username": r[1], "phone": r[2], "notes": r[3]} for r in rows]
 
 def delete_contact(user_id, name):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM contacts WHERE user_id=? AND name LIKE ?", (user_id, f"%{name}%"))
     conn.commit()
     conn.close()
 
 def save_recurring_reminder(user_id, chat_id, text, cron, description):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO recurring_reminders (user_id, chat_id, text, cron, description) VALUES (?, ?, ?, ?, ?)",
               (user_id, chat_id, text, cron, description))
@@ -196,7 +199,7 @@ def save_recurring_reminder(user_id, chat_id, text, cron, description):
     return reminder_id
 
 def get_recurring_reminders(user_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, text, cron, description FROM recurring_reminders WHERE user_id=?", (user_id,))
     rows = c.fetchall()
@@ -204,7 +207,7 @@ def get_recurring_reminders(user_id):
     return [{"id": r[0], "text": r[1], "cron": r[2], "description": r[3]} for r in rows]
 
 def get_all_recurring_reminders():
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, user_id, chat_id, text, cron FROM recurring_reminders")
     rows = c.fetchall()
@@ -212,14 +215,14 @@ def get_all_recurring_reminders():
     return rows
 
 def delete_recurring_reminder(user_id, reminder_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM recurring_reminders WHERE user_id=? AND id=?", (user_id, reminder_id))
     conn.commit()
     conn.close()
 
 def save_scheduled_message(user_id, username, message, send_at):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO scheduled_messages (user_id, username, message, send_at) VALUES (?, ?, ?, ?)",
               (user_id, username, message, send_at))
@@ -229,7 +232,7 @@ def save_scheduled_message(user_id, username, message, send_at):
     return msg_id
 
 def mark_scheduled_message_sent(msg_id):
-    conn = sqlite3.connect("memory.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE scheduled_messages SET sent=1 WHERE id=?", (msg_id,))
     conn.commit()
@@ -463,7 +466,7 @@ async def parse_action(text, user_id):
 {{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле без приветствия"}}
 
 Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
-{{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения", "datetime": "YYYY-MM-DD HH:MM"}}
+{{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения без приветствия", "datetime": "YYYY-MM-DD HH:MM"}}
 
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
@@ -571,7 +574,7 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     items = get_shopping_list(user_id)
     if not items:
-        await update.message.reply_text("🛒 Список покупок пуст\n\nДобавьте голосом или текстом: добавь молоко в список покупок")
+        await update.message.reply_text("🛒 Список покупок пуст\n\nДобавьте: добавь молоко в список покупок")
         return
     await update.message.reply_text("🛒 Список покупок:\n\n" + "\n".join(f"• {i}" for i in items))
 
@@ -940,10 +943,13 @@ def main():
             BotCommand("forget", "Очистить историю"),
         ])
 
-    app.post_init = lambda app: asyncio.gather(start_scheduler(app), set_commands(app))
+    async def on_startup(application):
+        await start_scheduler(application)
+        await set_commands(application)
+
+    app.post_init = on_startup
     print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
     app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
     main()
