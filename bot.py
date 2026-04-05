@@ -79,6 +79,17 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            message TEXT,
+            send_at TEXT,
+            sent INTEGER DEFAULT 0,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -207,6 +218,23 @@ def delete_recurring_reminder(user_id, reminder_id):
     conn.commit()
     conn.close()
 
+def save_scheduled_message(user_id, username, message, send_at):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO scheduled_messages (user_id, username, message, send_at) VALUES (?, ?, ?, ?)",
+              (user_id, username, message, send_at))
+    msg_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return msg_id
+
+def mark_scheduled_message_sent(msg_id):
+    conn = sqlite3.connect("memory.db")
+    c = conn.cursor()
+    c.execute("UPDATE scheduled_messages SET sent=1 WHERE id=?", (msg_id,))
+    conn.commit()
+    conn.close()
+
 def get_calendar_service():
     if not GOOGLE_CREDENTIALS:
         return None
@@ -236,6 +264,11 @@ async def send_telegram_userbot(username, message):
         return f"✅ Сообщение отправлено {username}"
     except Exception as e:
         return f"❌ Ошибка: {str(e)}"
+
+async def send_scheduled_message(msg_id, username, message):
+    await send_telegram_userbot(username, message)
+    mark_scheduled_message_sent(msg_id)
+    print(f"Отложенное сообщение {msg_id} отправлено {username}")
 
 async def create_calendar_event(title, start_datetime, reminder_minutes=60):
     service = get_calendar_service()
@@ -380,7 +413,7 @@ async def parse_action(text, user_id):
 
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
-        max_tokens=400,
+        max_tokens=500,
         system=f"""Ты определяешь действие из текста. Текущее время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M')}{contacts_info}
 
 Если просят добавить событие в календарь — верни JSON:
@@ -428,8 +461,11 @@ async def parse_action(text, user_id):
 Если просят удалить контакт — верни JSON:
 {{"action": "contact_delete", "name": "имя"}}
 
-Если просят написать сообщение кому-то — найди username в книге контактов и верни JSON:
+Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — найди username в книге контактов и верни JSON:
 {{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле"}}
+
+Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — найди username и верни JSON:
+{{"action": "send_telegram_scheduled", "username": "@username", "message": "текст сообщения", "datetime": "YYYY-MM-DD HH:MM"}}
 
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
@@ -473,7 +509,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📅 Управлять Google Calendar\n"
         "🛒 Вести список покупок\n"
         "👥 Книга контактов\n"
-        "📨 Отправлять сообщения в Telegram\n"
+        "📨 Отправлять сообщения сейчас или по расписанию\n"
         "🧠 Помню все наши разговоры\n"
         "🔊 Отвечать голосом\n\n"
         "Напиши /forget чтобы очистить историю"
@@ -718,6 +754,29 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         result = await send_telegram_userbot(username, message)
         await update.message.reply_text(f"{result}\n\n📝 Текст:\n{message}")
         return
+
+    if action_data.get("action") == "send_telegram_scheduled":
+        username = action_data.get("username")
+        message = action_data.get("message")
+        send_at = action_data.get("datetime")
+        if not username:
+            await update.message.reply_text("❌ Не найден username контакта — добавьте его в книгу контактов")
+            return
+        try:
+            tz = pytz.timezone("Europe/Moscow")
+            send_time = tz.localize(datetime.strptime(send_at, "%Y-%m-%d %H:%M"))
+            msg_id = save_scheduled_message(user_id, username, message, send_at)
+            scheduler.add_job(
+                send_scheduled_message,
+                trigger=DateTrigger(run_date=send_time),
+                args=[msg_id, username, message],
+                id=f"scheduled_msg_{msg_id}"
+            )
+            await update.message.reply_text(f"✅ Сообщение запланировано!\n📨 Кому: {username}\n⏰ Когда: {send_at}\n📝 Текст:\n{message}")
+            return
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            return
 
     if await needs_image(text):
         await update.message.reply_text("🎨 Генерирую картинку...")
