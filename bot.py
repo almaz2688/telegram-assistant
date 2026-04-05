@@ -14,6 +14,8 @@ from apscheduler.triggers.date import DateTrigger
 import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 load_dotenv()
 
@@ -22,6 +24,8 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
+TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID"))
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 
 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -123,6 +127,18 @@ def get_calendar_service():
     except Exception as e:
         print(f"Calendar error: {e}")
         return None
+
+async def send_telegram_userbot(username, message):
+    try:
+        client = TelegramClient('my_session', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        await client.connect()
+        if not await client.is_user_authorized():
+            return "❌ UserBot не авторизован — запустите userbot.py на Mac"
+        await client.send_message(username, message)
+        await client.disconnect()
+        return f"✅ Сообщение отправлено {username}"
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
 
 async def create_calendar_event(title, start_datetime, reminder_minutes=60):
     service = get_calendar_service()
@@ -243,7 +259,7 @@ async def needs_image(text):
 async def parse_action(text):
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
-        max_tokens=300,
+        max_tokens=400,
         system=f"""Ты определяешь действие из текста. Текущее время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M')}
 
 Если просят добавить событие в календарь — верни JSON:
@@ -269,6 +285,9 @@ async def parse_action(text):
 
 Если просят очистить список покупок — верни JSON:
 {{"action": "shopping_clear"}}
+
+Если просят написать сообщение кому-то в Telegram — верни JSON:
+{{"action": "send_telegram", "username": "@username", "message": "текст сообщения в дружелюбном деловом стиле"}}
 
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
@@ -311,6 +330,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⏰ Ставить напоминания\n"
         "📅 Управлять Google Calendar\n"
         "🛒 Вести список покупок\n"
+        "📨 Отправлять сообщения в Telegram\n"
         "🧠 Помню все наши разговоры\n"
         "🔊 Отвечать голосом\n\n"
         "Напиши /forget чтобы очистить историю"
@@ -444,6 +464,14 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if action_data.get("action") == "shopping_clear":
         clear_shopping_list(user_id)
         await update.message.reply_text("✅ Список покупок очищен!")
+        return
+
+    if action_data.get("action") == "send_telegram":
+        username = action_data.get("username")
+        message = action_data.get("message")
+        await update.message.reply_text(f"📨 Отправляю сообщение {username}...")
+        result = await send_telegram_userbot(username, message)
+        await update.message.reply_text(f"{result}\n\n📝 Текст:\n{message}")
         return
 
     if await needs_image(text):
