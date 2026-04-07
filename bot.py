@@ -296,10 +296,10 @@ async def get_today_events():
 
 async def get_weather():
     try:
-        result = tavily_client.search("погода Набережные Челны сегодня", max_results=2)
+        result = tavily_client.search("погода Набережные Челны сегодня температура минимальная максимальная", max_results=2)
         for r in result.get("results", []):
             if r.get("content"):
-                return r["content"][:200]
+                return r["content"][:300]
         return "Погода недоступна"
     except:
         return "Погода недоступна"
@@ -342,25 +342,40 @@ async def send_morning_briefing(chat_id):
         news = await get_news()
         quote = random.choice(MOTIVATIONAL_QUOTES)
 
-        briefing = "Доброе утро, Алмаз! \n\n"
-        briefing += f"Дата: {day_name}, {date_str}\n\n"
+        briefing = "☀️ Доброе утро, Алмаз!\n\n"
+        briefing += f"📆 {day_name}, {date_str}\n"
+        briefing += "━━━━━━━━━━━━━━━━\n\n"
 
-        briefing += "Сегодня в календаре:\n"
+        briefing += "📅 КАЛЕНДАРЬ НА СЕГОДНЯ:\n"
         if events:
             for event in events:
                 start = event["start"].get("dateTime", event["start"].get("date"))
                 if "T" in start:
-                    start_time = datetime.fromisoformat(start).strftime("%H:%M")
+                    dt = datetime.fromisoformat(start)
+                    if dt.tzinfo is None:
+                        dt = tz.localize(dt)
+                    else:
+                        dt = dt.astimezone(tz)
+                    start_time = dt.strftime("%H:%M")
                 else:
                     start_time = "весь день"
-                briefing += f"- {start_time} {event['summary']}\n"
+                briefing += f"  🕐 {start_time} — {event['summary']}\n"
         else:
-            briefing += "- Событий нет\n"
+            briefing += "  Событий нет\n"
 
-        briefing += f"\nПогода в Челнах:\n{weather[:200]}\n"
-        briefing += f"\nКурсы валют:\n{currency[:300]}\n"
-        briefing += f"\nНовости:\n{news}\n"
-        briefing += f"\nЦитата дня:\n{quote}"
+        briefing += "\n🌤 ПОГОДА В ЧЕЛНАХ:\n"
+        briefing += f"  {weather[:300]}\n"
+
+        briefing += "\n💰 КУРСЫ ВАЛЮТ:\n"
+        briefing += f"  {currency[:300]}\n"
+
+        briefing += "\n📰 НОВОСТИ:\n"
+        for line in news.split("\n"):
+            if line.strip():
+                briefing += f"  {line}\n"
+
+        briefing += "\n━━━━━━━━━━━━━━━━\n"
+        briefing += f"💪 {quote}"
 
         await bot_instance.send_message(chat_id=chat_id, text=briefing)
     except Exception as e:
@@ -486,7 +501,12 @@ async def list_calendar_events(date):
         for item in items:
             start = item["start"].get("dateTime", item["start"].get("date"))
             if "T" in start:
-                start_time = datetime.fromisoformat(start).strftime("%H:%M")
+                dt = datetime.fromisoformat(start)
+                if dt.tzinfo is None:
+                    dt = tz.localize(dt)
+                else:
+                    dt = dt.astimezone(tz)
+                start_time = dt.strftime("%H:%M")
             else:
                 start_time = "весь день"
             result += f"{start_time} — {item['summary']}\n"
