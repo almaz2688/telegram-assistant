@@ -296,31 +296,61 @@ async def get_today_events():
 
 async def get_weather():
     try:
-        result = tavily_client.search("погода Набережные Челны сегодня температура минимальная максимальная", max_results=2)
+        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d %B %Y")
+        result = tavily_client.search(
+            f"погода Набережные Челны прогноз на сегодня {today} температура днем вечером максимальная минимальная",
+            max_results=3
+        )
+        raw = ""
         for r in result.get("results", []):
             if r.get("content"):
-                return r["content"][:300]
-        return "Погода недоступна"
+                raw += r["content"][:500]
+        if not raw:
+            return "Погода недоступна"
+        response = anthropic_client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=150,
+            system=f"Сегодня {today}. Из текста извлеки прогноз погоды на СЕГОДНЯ для Набережных Челнов. Укажи: утром, днем, вечером температуру, максимальную и минимальную за день, что надеть. Ответ в 3-4 строки. Не пиши исторические данные.",
+            messages=[{"role": "user", "content": raw}]
+        )
+        return response.content[0].text.strip()
     except:
         return "Погода недоступна"
 
 async def get_currency():
     try:
-        result = tavily_client.search("курс доллара евро сом рубль сегодня", max_results=3)
+        result = tavily_client.search("курс доллара евро сом киргизский рубль сегодня ЦБ РФ", max_results=3)
+        raw = ""
         for r in result.get("results", []):
             if r.get("content"):
-                return r["content"][:300]
-        return "Курсы недоступны"
+                raw += r["content"][:500]
+        if not raw:
+            return "Курсы недоступны"
+        response = anthropic_client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=100,
+            system="Из текста извлеки актуальные курсы валют к рублю. Нужны: USD (доллар), EUR (евро), KGS (киргизский сом). Формат ответа:\nUSD: XX.XX руб\nEUR: XX.XX руб\nKGS: X.XX руб\nТолько эти три строки, без лишнего текста.",
+            messages=[{"role": "user", "content": raw}]
+        )
+        return response.content[0].text.strip()
     except:
         return "Курсы недоступны"
 
 async def get_news():
     try:
-        result = tavily_client.search("главные новости России сегодня", max_results=3)
-        news = []
-        for r in result.get("results", [])[:3]:
-            news.append(f"- {r['title']}")
-        return "\n".join(news) if news else "Новости недоступны"
+        result = tavily_client.search("главные новости России сегодня", max_results=5)
+        raw = ""
+        for r in result.get("results", [])[:5]:
+            raw += f"Заголовок: {r['title']}\nСодержание: {r.get('content', '')[:200]}\n\n"
+        if not raw:
+            return "Новости недоступны"
+        response = anthropic_client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=200,
+            system="Из текста выбери 3 самые важные новости дня. Каждую напиши одним коротким предложением своими словами. Формат:\n- Текст новости\n- Текст новости\n- Текст новости\nБез источников, ссылок и лишнего текста.",
+            messages=[{"role": "user", "content": raw}]
+        )
+        return response.content[0].text.strip()
     except:
         return "Новости недоступны"
 
@@ -364,10 +394,14 @@ async def send_morning_briefing(chat_id):
             briefing += "  Событий нет\n"
 
         briefing += "\n🌤 ПОГОДА В ЧЕЛНАХ:\n"
-        briefing += f"  {weather[:300]}\n"
+        for line in weather.split("\n"):
+            if line.strip():
+                briefing += f"  {line}\n"
 
         briefing += "\n💰 КУРСЫ ВАЛЮТ:\n"
-        briefing += f"  {currency[:300]}\n"
+        for line in currency.split("\n"):
+            if line.strip():
+                briefing += f"  {line}\n"
 
         briefing += "\n📰 НОВОСТИ:\n"
         for line in news.split("\n"):
