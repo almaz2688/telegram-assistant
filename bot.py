@@ -306,10 +306,10 @@ async def get_weather():
 
 async def get_currency():
     try:
-        result = tavily_client.search("курс доллара евро рубль сегодня", max_results=2)
+        result = tavily_client.search("курс доллара евро сом рубль сегодня", max_results=3)
         for r in result.get("results", []):
             if r.get("content"):
-                return r["content"][:200]
+                return r["content"][:300]
         return "Курсы недоступны"
     except:
         return "Курсы недоступны"
@@ -319,7 +319,7 @@ async def get_news():
         result = tavily_client.search("главные новости России сегодня", max_results=3)
         news = []
         for r in result.get("results", [])[:3]:
-            news.append(f"• {r['title']}")
+            news.append(f"- {r['title']}")
         return "\n".join(news) if news else "Новости недоступны"
     except:
         return "Новости недоступны"
@@ -334,7 +334,7 @@ async def send_morning_briefing(chat_id):
         day_name = days[now.weekday()]
         date_str = f"{now.day} {months[now.month-1]} {now.year}"
 
-        await bot_instance.send_message(chat_id=chat_id, text="⏳ Готовлю утренний брифинг...")
+        await bot_instance.send_message(chat_id=chat_id, text="Готовлю утренний брифинг...")
 
         events = await get_today_events()
         weather = await get_weather()
@@ -342,10 +342,10 @@ async def send_morning_briefing(chat_id):
         news = await get_news()
         quote = random.choice(MOTIVATIONAL_QUOTES)
 
-        briefing = f"☀️ Доброе утро, Алмаз!\n\n"
-        briefing += f"📆 {day_name}, {date_str}\n\n"
+        briefing = "Доброе утро, Алмаз! \n\n"
+        briefing += f"Дата: {day_name}, {date_str}\n\n"
 
-        briefing += "📅 Сегодня в календаре:\n"
+        briefing += "Сегодня в календаре:\n"
         if events:
             for event in events:
                 start = event["start"].get("dateTime", event["start"].get("date"))
@@ -353,19 +353,19 @@ async def send_morning_briefing(chat_id):
                     start_time = datetime.fromisoformat(start).strftime("%H:%M")
                 else:
                     start_time = "весь день"
-                briefing += f"• {start_time} — {event['summary']}\n"
+                briefing += f"- {start_time} {event['summary']}\n"
         else:
-            briefing += "• Событий нет\n"
+            briefing += "- Событий нет\n"
 
-        briefing += f"\n🌤 Погода в Челнах:\n{weather[:150]}\n"
-        briefing += f"\n💰 Курсы валют:\n{currency[:150]}\n"
-        briefing += f"\n📰 Новости:\n{news}\n"
-        briefing += f"\n💪 Цитата дня:\n_{quote}_"
+        briefing += f"\nПогода в Челнах:\n{weather[:200]}\n"
+        briefing += f"\nКурсы валют:\n{currency[:300]}\n"
+        briefing += f"\nНовости:\n{news}\n"
+        briefing += f"\nЦитата дня:\n{quote}"
 
-        await bot_instance.send_message(chat_id=chat_id, text=briefing, parse_mode="Markdown")
+        await bot_instance.send_message(chat_id=chat_id, text=briefing)
     except Exception as e:
         print(f"Briefing error: {e}")
-        await bot_instance.send_message(chat_id=chat_id, text=f"❌ Ошибка брифинга: {str(e)}")
+        await bot_instance.send_message(chat_id=chat_id, text=f"Ошибка брифинга: {str(e)}")
 
 async def find_recipient(client, contact):
     if contact.get("username"):
@@ -396,16 +396,16 @@ async def send_telegram_userbot(contact_info, message):
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
-            return "❌ UserBot не авторизован"
+            return "UserBot не авторизован"
         recipient = await find_recipient(client, contact_info)
         if recipient is None:
             await client.disconnect()
-            return f"❌ Не удалось найти {contact_info.get('name')} в Telegram"
+            return f"Не удалось найти {contact_info.get('name')} в Telegram"
         await client.send_message(recipient, message)
         await client.disconnect()
-        return f"✅ Сообщение отправлено {contact_info.get('name')}"
+        return f"Сообщение отправлено {contact_info.get('name')}"
     except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
+        return f"Ошибка: {str(e)}"
 
 async def send_scheduled_message(msg_id, contact_info, message):
     await send_telegram_userbot(contact_info, message)
@@ -414,7 +414,7 @@ async def send_scheduled_message(msg_id, contact_info, message):
 async def create_calendar_event(title, start_datetime, reminder_minutes=60):
     service = get_calendar_service()
     if not service:
-        return "❌ Google Calendar не подключён"
+        return "Google Calendar не подключён"
     try:
         tz = pytz.timezone("Europe/Moscow")
         if isinstance(start_datetime, str):
@@ -435,14 +435,14 @@ async def create_calendar_event(title, start_datetime, reminder_minutes=60):
             }
         }
         event = service.events().insert(calendarId="primary", body=event).execute()
-        return f"✅ Событие добавлено в Google Calendar!\n📅 {title}\n⏰ {start_dt.strftime('%d.%m.%Y %H:%M')}"
+        return f"Событие добавлено в Google Calendar!\n{title}\n{start_dt.strftime('%d.%m.%Y %H:%M')}"
     except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
+        return f"Ошибка: {str(e)}"
 
 async def delete_calendar_event(title, date):
     service = get_calendar_service()
     if not service:
-        return "❌ Google Calendar не подключён"
+        return "Google Calendar не подключён"
     try:
         tz = pytz.timezone("Europe/Moscow")
         date_dt = datetime.strptime(date, "%Y-%m-%d")
@@ -456,17 +456,17 @@ async def delete_calendar_event(title, date):
         ).execute()
         items = events.get("items", [])
         if not items:
-            return f"❌ Событие не найдено: {title} на {date}"
+            return f"Событие не найдено: {title} на {date}"
         for item in items:
             service.events().delete(calendarId="primary", eventId=item["id"]).execute()
-        return f"✅ Событие удалено: {title}"
+        return f"Событие удалено: {title}"
     except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
+        return f"Ошибка: {str(e)}"
 
 async def list_calendar_events(date):
     service = get_calendar_service()
     if not service:
-        return "❌ Google Calendar не подключён"
+        return "Google Calendar не подключён"
     try:
         tz = pytz.timezone("Europe/Moscow")
         date_dt = datetime.strptime(date, "%Y-%m-%d")
@@ -481,21 +481,21 @@ async def list_calendar_events(date):
         ).execute()
         items = events.get("items", [])
         if not items:
-            return f"📅 На {date_dt.strftime('%d.%m.%Y')} событий нет"
-        result = f"📅 События на {date_dt.strftime('%d.%m.%Y')}:\n\n"
+            return f"На {date_dt.strftime('%d.%m.%Y')} событий нет"
+        result = f"События на {date_dt.strftime('%d.%m.%Y')}:\n\n"
         for item in items:
             start = item["start"].get("dateTime", item["start"].get("date"))
             if "T" in start:
                 start_time = datetime.fromisoformat(start).strftime("%H:%M")
             else:
                 start_time = "весь день"
-            result += f"⏰ {start_time} — {item['summary']}\n"
+            result += f"{start_time} — {item['summary']}\n"
         return result
     except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
+        return f"Ошибка: {str(e)}"
 
 async def send_reminder(chat_id, text):
-    await bot_instance.send_message(chat_id=chat_id, text=f"⏰ Напоминание: {text}")
+    await bot_instance.send_message(chat_id=chat_id, text=f"Напоминание: {text}")
 
 async def search_web(query):
     try:
@@ -534,10 +534,10 @@ async def parse_cron(text):
         system="""Преобразуй описание повторяющегося напоминания в cron выражение.
 Формат cron: минуты часы день_месяца месяц день_недели
 Примеры:
-- каждый день в 9:00 → 0 9 * * *
-- каждый понедельник в 10:00 → 0 10 * * 1
-- каждое 1 число месяца в 12:00 → 0 12 1 * *
-- каждую пятницу в 18:00 → 0 18 * * 5
+- каждый день в 9:00 -> 0 9 * * *
+- каждый понедельник в 10:00 -> 0 10 * * 1
+- каждое 1 число месяца в 12:00 -> 0 12 1 * *
+- каждую пятницу в 18:00 -> 0 18 * * 5
 Верни ТОЛЬКО cron выражение, без пояснений.""",
         messages=[{"role": "user", "content": text}]
     )
@@ -640,8 +640,8 @@ async def text_to_voice(text, file_path):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     await update.message.reply_text(
-        f"Привет! Я твой личный помощник 🤖\n\n"
-        f"Твой chat_id: `{chat_id}` — сохрани его в Railway как MY_CHAT_ID\n\n"
+        f"Привет! Я твой личный помощник\n\n"
+        f"Твой chat_id: {chat_id}\n\n"
         "Быстрые команды:\n"
         "/contact Имя @username телефон — добавить контакт\n"
         "/contacts — все контакты\n"
@@ -649,13 +649,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/reminders — повторяющиеся напоминания\n"
         "/briefing — получить брифинг сейчас\n"
         "/forget — очистить историю\n\n"
-        "Или просто говорите голосом что нужно сделать!",
-        parse_mode="Markdown"
+        "Или просто говорите голосом что нужно сделать!"
     )
 
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
-    await update.message.reply_text("☀️ Готовлю брифинг...")
+    await update.message.reply_text("Готовлю брифинг...")
     await send_morning_briefing(chat_id)
 
 async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -689,11 +688,11 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = " ".join(name_parts) if name_parts else None
 
     if not name:
-        await update.message.reply_text("❌ Укажите имя контакта")
+        await update.message.reply_text("Укажите имя контакта")
         return
 
     save_contact(user_id, name, username, phone)
-    result = f"✅ Контакт сохранён: {name}"
+    result = f"Контакт сохранён: {name}"
     if username:
         result += f"\nTelegram: {username}"
     if phone:
@@ -704,11 +703,11 @@ async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     contacts = get_all_contacts(user_id)
     if not contacts:
-        await update.message.reply_text("👥 Книга контактов пуста\n\nДобавьте: /contact Имя @username")
+        await update.message.reply_text("Книга контактов пуста\n\nДобавьте: /contact Имя @username")
         return
-    result = "👥 Ваши контакты:\n\n"
+    result = "Ваши контакты:\n\n"
     for c in contacts:
-        result += f"👤 {c['name']}\n"
+        result += f"{c['name']}\n"
         if c['username']:
             result += f"   Telegram: {c['username']}\n"
         if c['phone']:
@@ -722,29 +721,29 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     items = get_shopping_list(user_id)
     if not items:
-        await update.message.reply_text("🛒 Список покупок пуст")
+        await update.message.reply_text("Список покупок пуст")
         return
-    await update.message.reply_text("🛒 Список покупок:\n\n" + "\n".join(f"• {i}" for i in items))
+    await update.message.reply_text("Список покупок:\n\n" + "\n".join(f"- {i}" for i in items))
 
 async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     reminders = get_recurring_reminders(user_id)
     if not reminders:
-        await update.message.reply_text("⏰ Повторяющихся напоминаний нет")
+        await update.message.reply_text("Повторяющихся напоминаний нет")
         return
-    result = "⏰ Повторяющиеся напоминания:\n\n"
+    result = "Повторяющиеся напоминания:\n\n"
     for r in reminders:
-        result += f"#{r['id']} — {r['description']}\n📝 {r['text']}\n\n"
+        result += f"#{r['id']} — {r['description']}\n{r['text']}\n\n"
     result += "Для удаления скажите: удали напоминание #номер"
     await update.message.reply_text(result)
 
 async def forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     clear_history(user_id)
-    await update.message.reply_text("🧹 История разговора очищена!")
+    await update.message.reply_text("История разговора очищена!")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎙 Слушаю...")
+    await update.message.reply_text("Слушаю...")
     voice = update.message.voice
     file = await context.bot.get_file(voice.file_id)
     os.makedirs("voice_files", exist_ok=True)
@@ -757,12 +756,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             language="ru"
         )
     text = transcript.text
-    await update.message.reply_text(f"🗣 Ты сказал: {text}")
+    await update.message.reply_text(f"Ты сказал: {text}")
     os.remove(file_path)
     await process_message(update, context, text)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🖼 Анализирую фото...")
+    await update.message.reply_text("Анализирую фото...")
     photo = update.message.photo[-1]
     file = await context.bot.get_file(photo.file_id)
     os.makedirs("voice_files", exist_ok=True)
@@ -800,12 +799,12 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     user_id = update.message.from_user.id
     chat_id = update.message.chat_id
 
-    await update.message.reply_text("⏳ Думаю...")
+    await update.message.reply_text("Думаю...")
 
     action_data = await parse_action(text, user_id)
 
     if action_data.get("action") == "calendar":
-        await update.message.reply_text("📅 Добавляю в Google Calendar...")
+        await update.message.reply_text("Добавляю в Google Calendar...")
         result = await create_calendar_event(
             title=action_data["title"],
             start_datetime=action_data["datetime"],
@@ -815,7 +814,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         return
 
     if action_data.get("action") == "delete_calendar":
-        await update.message.reply_text("🗑 Удаляю из Google Calendar...")
+        await update.message.reply_text("Удаляю из Google Calendar...")
         result = await delete_calendar_event(
             title=action_data["title"],
             date=action_data["date"]
@@ -824,7 +823,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         return
 
     if action_data.get("action") == "list_calendar":
-        await update.message.reply_text("📅 Смотрю календарь...")
+        await update.message.reply_text("Смотрю календарь...")
         result = await list_calendar_events(date=action_data["date"])
         await update.message.reply_text(result)
         return
@@ -838,10 +837,10 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 trigger=DateTrigger(run_date=reminder_time),
                 args=[chat_id, action_data["text"]]
             )
-            await update.message.reply_text(f"✅ Напоминание установлено!\n⏰ {action_data['datetime']}\n📝 {action_data['text']}")
+            await update.message.reply_text(f"Напоминание установлено!\n{action_data['datetime']}\n{action_data['text']}")
             return
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            await update.message.reply_text(f"Ошибка: {str(e)}")
             return
 
     if action_data.get("action") == "recurring_reminder":
@@ -867,20 +866,20 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 args=[chat_id, action_data["text"]],
                 id=f"recurring_{reminder_id}"
             )
-            await update.message.reply_text(f"✅ Повторяющееся напоминание установлено!\n📅 {action_data['description']}\n📝 {action_data['text']}\n\nID: {reminder_id}")
+            await update.message.reply_text(f"Повторяющееся напоминание установлено!\n{action_data['description']}\n{action_data['text']}\nID: {reminder_id}")
             return
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            await update.message.reply_text(f"Ошибка: {str(e)}")
             return
 
     if action_data.get("action") == "recurring_list":
         reminders = get_recurring_reminders(user_id)
         if not reminders:
-            await update.message.reply_text("⏰ Повторяющихся напоминаний нет")
+            await update.message.reply_text("Повторяющихся напоминаний нет")
         else:
-            result = "⏰ Повторяющиеся напоминания:\n\n"
+            result = "Повторяющиеся напоминания:\n\n"
             for r in reminders:
-                result += f"#{r['id']} — {r['description']}\n📝 {r['text']}\n\n"
+                result += f"#{r['id']} — {r['description']}\n{r['text']}\n\n"
             await update.message.reply_text(result)
         return
 
@@ -891,31 +890,31 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             scheduler.remove_job(f"recurring_{reminder_id}")
         except:
             pass
-        await update.message.reply_text(f"✅ Напоминание #{reminder_id} удалено!")
+        await update.message.reply_text(f"Напоминание #{reminder_id} удалено!")
         return
 
     if action_data.get("action") == "shopping_add":
         items = action_data.get("items", [])
         add_shopping_items(user_id, items)
-        await update.message.reply_text(f"✅ Добавлено в список покупок:\n" + "\n".join(f"• {i}" for i in items))
+        await update.message.reply_text("Добавлено в список покупок:\n" + "\n".join(f"- {i}" for i in items))
         return
 
     if action_data.get("action") == "shopping_list":
         items = get_shopping_list(user_id)
         if not items:
-            await update.message.reply_text("🛒 Список покупок пуст")
+            await update.message.reply_text("Список покупок пуст")
         else:
-            await update.message.reply_text("🛒 Список покупок:\n\n" + "\n".join(f"• {i}" for i in items))
+            await update.message.reply_text("Список покупок:\n\n" + "\n".join(f"- {i}" for i in items))
         return
 
     if action_data.get("action") == "shopping_delete":
         delete_shopping_item(user_id, action_data["item"])
-        await update.message.reply_text(f"✅ Удалено из списка: {action_data['item']}")
+        await update.message.reply_text(f"Удалено из списка: {action_data['item']}")
         return
 
     if action_data.get("action") == "shopping_clear":
         clear_shopping_list(user_id)
-        await update.message.reply_text("✅ Список покупок очищен!")
+        await update.message.reply_text("Список покупок очищен!")
         return
 
     if action_data.get("action") == "contact_save":
@@ -926,17 +925,17 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             phone=action_data.get("phone"),
             notes=action_data.get("notes")
         )
-        await update.message.reply_text(f"✅ Контакт сохранён: {action_data.get('name')}")
+        await update.message.reply_text(f"Контакт сохранён: {action_data.get('name')}")
         return
 
     if action_data.get("action") == "contact_list":
         contacts = get_all_contacts(user_id)
         if not contacts:
-            await update.message.reply_text("👥 Книга контактов пуста")
+            await update.message.reply_text("Книга контактов пуста")
         else:
-            result = "👥 Ваши контакты:\n\n"
+            result = "Ваши контакты:\n\n"
             for c in contacts:
-                result += f"👤 {c['name']}\n"
+                result += f"{c['name']}\n"
                 if c['username']:
                     result += f"   Telegram: {c['username']}\n"
                 if c['phone']:
@@ -950,9 +949,9 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if action_data.get("action") == "contact_find":
         contact = find_contact(user_id, action_data.get("name"))
         if not contact:
-            await update.message.reply_text(f"❌ Контакт не найден: {action_data.get('name')}")
+            await update.message.reply_text(f"Контакт не найден: {action_data.get('name')}")
         else:
-            result = f"👤 {contact['name']}\n"
+            result = f"{contact['name']}\n"
             if contact['username']:
                 result += f"Telegram: {contact['username']}\n"
             if contact['phone']:
@@ -964,7 +963,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     if action_data.get("action") == "contact_delete":
         delete_contact(user_id, action_data.get("name"))
-        await update.message.reply_text(f"✅ Контакт удалён: {action_data.get('name')}")
+        await update.message.reply_text(f"Контакт удалён: {action_data.get('name')}")
         return
 
     if action_data.get("action") == "send_telegram":
@@ -972,11 +971,11 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         message = action_data.get("message")
         contact = find_contact(user_id, contact_name)
         if not contact:
-            await update.message.reply_text(f"❌ Контакт не найден: {contact_name}\nДобавьте через /contact")
+            await update.message.reply_text(f"Контакт не найден: {contact_name}\nДобавьте через /contact")
             return
-        await update.message.reply_text(f"📨 Отправляю сообщение {contact['name']}...")
+        await update.message.reply_text(f"Отправляю сообщение {contact['name']}...")
         result = await send_telegram_userbot(contact, message)
-        await update.message.reply_text(f"{result}\n\n📝 Текст:\n{message}")
+        await update.message.reply_text(f"{result}\n\nТекст:\n{message}")
         return
 
     if action_data.get("action") == "send_telegram_scheduled":
@@ -985,7 +984,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         send_at = action_data.get("datetime")
         contact = find_contact(user_id, contact_name)
         if not contact:
-            await update.message.reply_text(f"❌ Контакт не найден: {contact_name}\nДобавьте через /contact")
+            await update.message.reply_text(f"Контакт не найден: {contact_name}\nДобавьте через /contact")
             return
         try:
             tz = pytz.timezone("Europe/Moscow")
@@ -997,24 +996,24 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 args=[msg_id, contact, message],
                 id=f"scheduled_msg_{msg_id}"
             )
-            await update.message.reply_text(f"✅ Сообщение запланировано!\n📨 Кому: {contact['name']}\n⏰ Когда: {send_at}\n📝 Текст:\n{message}")
+            await update.message.reply_text(f"Сообщение запланировано!\nКому: {contact['name']}\nКогда: {send_at}\nТекст:\n{message}")
             return
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            await update.message.reply_text(f"Ошибка: {str(e)}")
             return
 
     if await needs_image(text):
-        await update.message.reply_text("🎨 Генерирую картинку...")
+        await update.message.reply_text("Генерирую картинку...")
         try:
             image_url = await generate_image(text)
-            await update.message.reply_photo(photo=image_url, caption="Вот твоя картинка! 🎨")
+            await update.message.reply_photo(photo=image_url, caption="Вот твоя картинка!")
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка генерации: {str(e)}")
+            await update.message.reply_text(f"Ошибка генерации: {str(e)}")
         return
 
     search_result = ""
     if await needs_search(text):
-        await update.message.reply_text("🔍 Ищу в интернете...")
+        await update.message.reply_text("Ищу в интернете...")
         search_result = await search_web(text)
 
     history = get_history(user_id)
@@ -1091,7 +1090,7 @@ def main():
                 args=[int(MY_CHAT_ID)],
                 id="morning_briefing"
             )
-            print("✅ Утренний брифинг запланирован на 6:00 МСК")
+            print("Утренний брифинг запланирован на 6:00 МСК")
 
         await application.bot.set_my_commands([
             BotCommand("start", "Главное меню"),
@@ -1104,7 +1103,7 @@ def main():
         ])
 
     app.post_init = on_startup
-    print("Бот запущен! Нажми Ctrl+C чтобы остановить.")
+    print("Бот запущен!")
     app.run_polling()
 
 if __name__ == "__main__":
