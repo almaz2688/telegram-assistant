@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+import random
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from telethon import TelegramClient
@@ -30,6 +31,7 @@ GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID"))
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION")
+MY_CHAT_ID = os.getenv("MY_CHAT_ID")
 
 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -39,6 +41,19 @@ scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 bot_instance = None
 
 DB_PATH = "/app/data/memory.db"
+
+MOTIVATIONAL_QUOTES = [
+    "Успех — это сумма небольших усилий, повторяемых день за днём.",
+    "Не жди идеального момента. Возьми момент и сделай его идеальным.",
+    "Каждый день — это новый шанс стать лучше чем вчера.",
+    "Большие дела начинаются с маленьких шагов.",
+    "Твои ограничения существуют только в твоей голове.",
+    "Действуй так, будто то что ты делаешь имеет значение — потому что так и есть.",
+    "Успешные люди делают то, что неуспешные не хотят делать.",
+    "Мотивация приходит после начала действия, а не до него.",
+    "Не бойся медленно идти, бойся стоять на месте.",
+    "Лучший способ предсказать будущее — создать его.",
+]
 
 def init_db():
     os.makedirs("/app/data", exist_ok=True)
@@ -258,13 +273,103 @@ def get_calendar_service():
         print(f"Calendar error: {e}")
         return None
 
+async def get_today_events():
+    service = get_calendar_service()
+    if not service:
+        return []
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        now = datetime.now(tz)
+        time_min = now.replace(hour=0, minute=0, second=0).isoformat()
+        time_max = now.replace(hour=23, minute=59, second=59).isoformat()
+        events = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+        return events.get("items", [])
+    except Exception as e:
+        print(f"Calendar events error: {e}")
+        return []
+
+async def get_weather():
+    try:
+        result = tavily_client.search("погода Набережные Челны сегодня", max_results=2)
+        for r in result.get("results", []):
+            if r.get("content"):
+                return r["content"][:200]
+        return "Погода недоступна"
+    except:
+        return "Погода недоступна"
+
+async def get_currency():
+    try:
+        result = tavily_client.search("курс доллара евро рубль сегодня", max_results=2)
+        for r in result.get("results", []):
+            if r.get("content"):
+                return r["content"][:200]
+        return "Курсы недоступны"
+    except:
+        return "Курсы недоступны"
+
+async def get_news():
+    try:
+        result = tavily_client.search("главные новости России сегодня", max_results=3)
+        news = []
+        for r in result.get("results", [])[:3]:
+            news.append(f"• {r['title']}")
+        return "\n".join(news) if news else "Новости недоступны"
+    except:
+        return "Новости недоступны"
+
+async def send_morning_briefing(chat_id):
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        now = datetime.now(tz)
+        days = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
+        months = ["января", "февраля", "марта", "апреля", "мая", "июня",
+                  "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+        day_name = days[now.weekday()]
+        date_str = f"{now.day} {months[now.month-1]} {now.year}"
+
+        await bot_instance.send_message(chat_id=chat_id, text="⏳ Готовлю утренний брифинг...")
+
+        events = await get_today_events()
+        weather = await get_weather()
+        currency = await get_currency()
+        news = await get_news()
+        quote = random.choice(MOTIVATIONAL_QUOTES)
+
+        briefing = f"☀️ Доброе утро, Алмаз!\n\n"
+        briefing += f"📆 {day_name}, {date_str}\n\n"
+
+        briefing += "📅 Сегодня в календаре:\n"
+        if events:
+            for event in events:
+                start = event["start"].get("dateTime", event["start"].get("date"))
+                if "T" in start:
+                    start_time = datetime.fromisoformat(start).strftime("%H:%M")
+                else:
+                    start_time = "весь день"
+                briefing += f"• {start_time} — {event['summary']}\n"
+        else:
+            briefing += "• Событий нет\n"
+
+        briefing += f"\n🌤 Погода в Челнах:\n{weather[:150]}\n"
+        briefing += f"\n💰 Курсы валют:\n{currency[:150]}\n"
+        briefing += f"\n📰 Новости:\n{news}\n"
+        briefing += f"\n💪 Цитата дня:\n_{quote}_"
+
+        await bot_instance.send_message(chat_id=chat_id, text=briefing, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Briefing error: {e}")
+        await bot_instance.send_message(chat_id=chat_id, text=f"❌ Ошибка брифинга: {str(e)}")
+
 async def find_recipient(client, contact):
-    """Ищет получателя по username, телефону или имени в диалогах"""
-    # 1. По username
     if contact.get("username"):
         return contact["username"]
-
-    # 2. По телефону
     if contact.get("phone"):
         try:
             phone = contact["phone"]
@@ -275,8 +380,6 @@ async def find_recipient(client, contact):
                 return result.users[0]
         except Exception as e:
             print(f"Phone lookup error: {e}")
-
-    # 3. По имени в диалогах
     if contact.get("name"):
         try:
             name_lower = contact["name"].lower()
@@ -285,24 +388,19 @@ async def find_recipient(client, contact):
                     return dialog.entity
         except Exception as e:
             print(f"Dialog lookup error: {e}")
-
     return None
 
 async def send_telegram_userbot(contact_info, message):
-    """contact_info — словарь с name, username, phone"""
     try:
         client = TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH)
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
             return "❌ UserBot не авторизован"
-
         recipient = await find_recipient(client, contact_info)
-
         if recipient is None:
             await client.disconnect()
             return f"❌ Не удалось найти {contact_info.get('name')} в Telegram"
-
         await client.send_message(recipient, message)
         await client.disconnect()
         return f"✅ Сообщение отправлено {contact_info.get('name')}"
@@ -540,16 +638,25 @@ async def text_to_voice(text, file_path):
     response.stream_to_file(file_path)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
     await update.message.reply_text(
-        "Привет! Я твой личный помощник 🤖\n\n"
+        f"Привет! Я твой личный помощник 🤖\n\n"
+        f"Твой chat_id: `{chat_id}` — сохрани его в Railway как MY_CHAT_ID\n\n"
         "Быстрые команды:\n"
         "/contact Имя @username телефон — добавить контакт\n"
         "/contacts — все контакты\n"
         "/shopping — список покупок\n"
         "/reminders — повторяющиеся напоминания\n"
+        "/briefing — получить брифинг сейчас\n"
         "/forget — очистить историю\n\n"
-        "Или просто говорите голосом что нужно сделать!"
+        "Или просто говорите голосом что нужно сделать!",
+        parse_mode="Markdown"
     )
+
+async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    await update.message.reply_text("☀️ Готовлю брифинг...")
+    await send_morning_briefing(chat_id)
 
 async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -950,6 +1057,7 @@ def main():
     app.add_handler(CommandHandler("contacts", cmd_contacts))
     app.add_handler(CommandHandler("shopping", cmd_shopping))
     app.add_handler(CommandHandler("reminders", cmd_reminders))
+    app.add_handler(CommandHandler("briefing", cmd_briefing))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
@@ -975,12 +1083,23 @@ def main():
                 )
             except Exception as e:
                 print(f"Error loading reminder {reminder_id}: {e}")
+
+        if MY_CHAT_ID:
+            scheduler.add_job(
+                send_morning_briefing,
+                trigger=CronTrigger(hour=6, minute=0, timezone="Europe/Moscow"),
+                args=[int(MY_CHAT_ID)],
+                id="morning_briefing"
+            )
+            print("✅ Утренний брифинг запланирован на 6:00 МСК")
+
         await application.bot.set_my_commands([
             BotCommand("start", "Главное меню"),
             BotCommand("contact", "Добавить контакт"),
             BotCommand("contacts", "Все контакты"),
             BotCommand("shopping", "Список покупок"),
             BotCommand("reminders", "Повторяющиеся напоминания"),
+            BotCommand("briefing", "Утренний брифинг сейчас"),
             BotCommand("forget", "Очистить историю"),
         ])
 
