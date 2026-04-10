@@ -47,6 +47,9 @@ SPORTS_DOMAINS = ["championat.com", "sports.ru", "khl.ru", "sport-express.ru", "
 NEWS_DOMAINS = ["ria.ru", "tass.ru", "rbc.ru", "lenta.ru", "iz.ru", "kommersant.ru"]
 WEATHER_DOMAINS = ["pogoda.ru", "gismeteo.ru", "rp5.ru"]
 FINANCE_DOMAINS = ["rbc.ru", "banki.ru", "cbr.ru", "finance.mail.ru", "investing.com"]
+TECH_DOMAINS = ["techcrunch.com", "habr.com", "vc.ru", "tjournal.ru", "wired.com"]
+CRYPTO_DOMAINS = ["coindesk.com", "cointelegraph.com", "decrypt.co", "bits.media", "cryptonews.com"]
+REALTY_DOMAINS = ["cian.ru", "realty.rbc.ru", "bn.ru", "irn.ru", "domclick.ru"]
 
 # Ключевые слова — при их наличии дата подставляется в поисковый запрос
 DATE_KEYWORDS = [
@@ -321,7 +324,6 @@ async def smart_search(user_text: str) -> str:
     """
     Claude решает нужен ли поиск, формирует запрос и тематику.
     Дата автоматически добавляется к запросам про текущие события.
-    Возвращает строку с результатами или пустую строку.
     """
     tz = pytz.timezone("Europe/Moscow")
     now = datetime.now(tz)
@@ -369,7 +371,7 @@ async def smart_search(user_text: str) -> str:
         "weather": WEATHER_DOMAINS,
         "finance": FINANCE_DOMAINS,
     }
-    domains = domain_map.get(topic)  # None = общий поиск без фильтра
+    domains = domain_map.get(topic)
 
     return await search_web(query, include_domains=domains)
 
@@ -511,8 +513,93 @@ async def list_calendar_events(date):
 
 
 # ─────────────────────────────────────────────
-#  УТРЕННИЙ БРИФИНГ
+#  УТРЕННИЙ БРИФИНГ — НОВОСТИ (5 категорий)
 # ─────────────────────────────────────────────
+
+async def get_news_by_topic(topic_query: str, topic_label: str,
+                            domains: list, today: str) -> str:
+    """
+    Ищет новость по конкретной теме и возвращает одно предложение-итог.
+    topic_label используется в промпте чтобы Claude понимал контекст.
+    """
+    try:
+        raw = await search_web(
+            f"{topic_query} новости {today}",
+            include_domains=domains,
+            max_results=3
+        )
+        if not raw:
+            return f"Нет данных по теме: {topic_label}"
+
+        response = anthropic_client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=120,
+            system=f"Из текста выбери ОДНУ самую важную и свежую новость на тему «{topic_label}». "
+                   f"Перескажи её одним ёмким предложением своими словами на русском. "
+                   f"Только факт из текста — не додумывай. Без источников и ссылок.",
+            messages=[{"role": "user", "content": raw}]
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        print(f"get_news_by_topic error ({topic_label}): {e}")
+        return f"Нет данных по теме: {topic_label}"
+
+
+async def get_five_news(today: str) -> dict:
+    """
+    Параллельно собирает 5 новостей по категориям.
+    Возвращает словарь {категория: текст}.
+    """
+    topics = [
+        {
+            "key": "vibe_coding",
+            "label": "Вайб-кодинг",
+            "query": "vibe coding AI programming tools cursor claude",
+            "domains": TECH_DOMAINS,
+            "emoji": "💻",
+        },
+        {
+            "key": "ai",
+            "label": "Искусственный интеллект",
+            "query": "искусственный интеллект AI нейросети OpenAI Anthropic Google",
+            "domains": TECH_DOMAINS + NEWS_DOMAINS,
+            "emoji": "🤖",
+        },
+        {
+            "key": "economy",
+            "label": "Экономика",
+            "query": "экономика мировая Россия рынки ставки ВВП",
+            "domains": FINANCE_DOMAINS + NEWS_DOMAINS,
+            "emoji": "📊",
+        },
+        {
+            "key": "crypto",
+            "label": "Криптовалюта",
+            "query": "bitcoin ethereum crypto криптовалюта рынок",
+            "domains": CRYPTO_DOMAINS,
+            "emoji": "₿",
+        },
+        {
+            "key": "realty",
+            "label": "Недвижимость",
+            "query": "недвижимость рынок жильё ипотека цены квартиры Россия",
+            "domains": REALTY_DOMAINS + NEWS_DOMAINS,
+            "emoji": "🏠",
+        },
+    ]
+
+    results = {}
+    for t in topics:
+        news_text = await get_news_by_topic(
+            topic_query=t["query"],
+            topic_label=t["label"],
+            domains=t["domains"],
+            today=today,
+        )
+        results[t["key"]] = {"emoji": t["emoji"], "label": t["label"], "text": news_text}
+
+    return results
+
 
 async def get_weather():
     try:
@@ -562,29 +649,6 @@ async def get_currency():
         return "Курсы недоступны"
 
 
-async def get_news():
-    try:
-        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
-        raw = await search_web(
-            f"главные новости России {today}",
-            include_domains=NEWS_DOMAINS,
-            max_results=5
-        )
-        if not raw:
-            return "Новости недоступны"
-        response = anthropic_client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=200,
-            system="Из текста выбери 3 самые важные новости. Каждую перескажи одним предложением своими словами. "
-                   "Формат:\n- Новость\n- Новость\n- Новость\nТолько то что есть в тексте. Без ссылок.",
-            messages=[{"role": "user", "content": raw}]
-        )
-        return response.content[0].text.strip()
-    except Exception as e:
-        print(f"get_news error: {e}")
-        return "Новости недоступны"
-
-
 async def send_morning_briefing(chat_id):
     try:
         tz = pytz.timezone("Europe/Moscow")
@@ -594,19 +658,21 @@ async def send_morning_briefing(chat_id):
                   "июля", "августа", "сентября", "октября", "ноября", "декабря"]
         day_name = days[now.weekday()]
         date_str = f"{now.day} {months[now.month - 1]} {now.year}"
+        today_str = now.strftime("%d.%m.%Y")
 
         await bot_instance.send_message(chat_id=chat_id, text="Готовлю утренний брифинг...")
 
         events = await get_today_events()
         weather = await get_weather()
         currency = await get_currency()
-        news = await get_news()
+        five_news = await get_five_news(today_str)
         quote = random.choice(MOTIVATIONAL_QUOTES)
 
         briefing = "☀️ Доброе утро, Алмаз!\n\n"
         briefing += f"📆 {day_name}, {date_str}\n"
         briefing += "━━━━━━━━━━━━━━━━\n\n"
 
+        # Календарь
         briefing += "📅 КАЛЕНДАРЬ НА СЕГОДНЯ:\n"
         if events:
             for event in events:
@@ -624,20 +690,25 @@ async def send_morning_briefing(chat_id):
         else:
             briefing += "  Событий нет\n"
 
+        # Погода
         briefing += "\n🌤 ПОГОДА В ЧЕЛНАХ:\n"
         for line in weather.split("\n"):
             if line.strip():
                 briefing += f"  {line}\n"
 
+        # Курсы валют
         briefing += "\n💰 КУРСЫ ВАЛЮТ:\n"
         for line in currency.split("\n"):
             if line.strip():
                 briefing += f"  {line}\n"
 
+        # 5 новостей по категориям
         briefing += "\n📰 НОВОСТИ:\n"
-        for line in news.split("\n"):
-            if line.strip():
-                briefing += f"  {line}\n"
+        news_order = ["vibe_coding", "ai", "economy", "crypto", "realty"]
+        for i, key in enumerate(news_order, start=1):
+            item = five_news[key]
+            briefing += f"\n  {i}. {item['emoji']} {item['label'].upper()}\n"
+            briefing += f"  {item['text']}\n"
 
         briefing += "\n━━━━━━━━━━━━━━━━\n"
         briefing += f"💪 {quote}"
@@ -1232,8 +1303,6 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         await update.message.reply_text("🔍 Нашёл информацию, формирую ответ...")
 
     # ── Ответ Claude ──
-    # Два разных системных промпта: с поиском и без.
-    # Когда есть данные поиска — Claude жёстко привязан к ним и не может додумывать факты.
     tz = pytz.timezone("Europe/Moscow")
     now_str = datetime.now(tz).strftime("%d.%m.%Y %H:%M")
 
@@ -1241,7 +1310,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         system_prompt = (
             f"Ты личный помощник. Отвечай на русском языке.\n"
             f"Сейчас {now_str} МСК.\n\n"
-            f"ПРАВИЛО: Отвечай СТРОГО на основе результатов поиска, которые даны в сообщении пользователя.\n"
+            f"ПРАВИЛО: Отвечай СТРОГО на основе результатов поиска из сообщения.\n"
             f"ЗАПРЕЩЕНО додумывать команды, счета, цены, даты и любые конкретные факты.\n"
             f"Если нужных данных в поиске нет — честно скажи об этом.\n"
             f"Используй эмодзи где уместно."
