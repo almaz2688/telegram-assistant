@@ -43,10 +43,16 @@ bot_instance = None
 DB_PATH = "/app/data/memory.db"
 
 # Домены для разных тематик поиска
-SPORTS_DOMAINS = ["championat.com", "sports.ru", "khl.ru", "sport-express.ru", "matchtv.ru", "nhl.com", "uefa.com"]
+SPORTS_DOMAINS = ["championat.com", "sports.ru", "khl.ru", "sport-express.ru", "matchtv.ru"]
 NEWS_DOMAINS = ["ria.ru", "tass.ru", "rbc.ru", "lenta.ru", "iz.ru", "kommersant.ru"]
-WEATHER_DOMAINS = ["pogoda.ru", "gismeteo.ru", "weather.com", "rp5.ru"]
+WEATHER_DOMAINS = ["pogoda.ru", "gismeteo.ru", "rp5.ru"]
 FINANCE_DOMAINS = ["rbc.ru", "banki.ru", "cbr.ru", "finance.mail.ru", "investing.com"]
+
+# Ключевые слова — при их наличии дата подставляется в поисковый запрос
+DATE_KEYWORDS = [
+    "сегодня", "today", "сейчас", "now", "играет", "матч", "матчи",
+    "расписание", "результат", "счёт", "погода", "курс", "новости"
+]
 
 MOTIVATIONAL_QUOTES = [
     "Успех — это сумма небольших усилий, повторяемых день за днём.",
@@ -231,8 +237,10 @@ def delete_contact(user_id, name):
 def save_recurring_reminder(user_id, chat_id, text, cron, description):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT INTO recurring_reminders (user_id, chat_id, text, cron, description) VALUES (?, ?, ?, ?, ?)",
-              (user_id, chat_id, text, cron, description))
+    c.execute(
+        "INSERT INTO recurring_reminders (user_id, chat_id, text, cron, description) VALUES (?, ?, ?, ?, ?)",
+        (user_id, chat_id, text, cron, description)
+    )
     reminder_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -268,8 +276,10 @@ def delete_recurring_reminder(user_id, reminder_id):
 def save_scheduled_message(user_id, username, message, send_at):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT INTO scheduled_messages (user_id, username, message, send_at) VALUES (?, ?, ?, ?)",
-              (user_id, username, message, send_at))
+    c.execute(
+        "INSERT INTO scheduled_messages (user_id, username, message, send_at) VALUES (?, ?, ?, ?)",
+        (user_id, username, message, send_at)
+    )
     msg_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -288,15 +298,36 @@ def mark_scheduled_message_sent(msg_id):
 #  УМНЫЙ ПОИСК
 # ─────────────────────────────────────────────
 
+async def search_web(query: str, include_domains: list = None, max_results: int = 5) -> str:
+    """Поиск через Tavily с опциональной фильтрацией по доменам."""
+    try:
+        kwargs = {"query": query, "max_results": max_results}
+        if include_domains:
+            kwargs["include_domains"] = include_domains
+        result = tavily_client.search(**kwargs)
+        texts = []
+        for r in result.get("results", []):
+            title = r.get("title", "")
+            content = r.get("content", "")[:500]
+            url = r.get("url", "")
+            texts.append(f"[{title}]\n{content}\nИсточник: {url}")
+        return "\n\n".join(texts) if texts else ""
+    except Exception as e:
+        print(f"search_web error: {e}")
+        return ""
+
+
 async def smart_search(user_text: str) -> str:
     """
-    Claude сам решает:
-    1. Нужен ли поиск
-    2. Какой запрос сформировать
-    3. Какую тематику использовать (спорт / новости / финансы / погода / общий)
+    Claude решает нужен ли поиск, формирует запрос и тематику.
+    Дата автоматически добавляется к запросам про текущие события.
     Возвращает строку с результатами или пустую строку.
     """
-    now_str = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y %H:%M")
+    tz = pytz.timezone("Europe/Moscow")
+    now = datetime.now(tz)
+    now_str = now.strftime("%d.%m.%Y %H:%M")
+    today_str = now.strftime("%d.%m.%Y")
+
     try:
         resp = anthropic_client.messages.create(
             model="claude-opus-4-5",
@@ -304,8 +335,8 @@ async def smart_search(user_text: str) -> str:
             system=f"""Сегодня {now_str} (московское время).
 Определи, нужен ли поиск в интернете для ответа на сообщение пользователя.
 
-Поиск НУЖЕН для: новости, погода, курсы валют, спорт (результаты/расписание/счёт), цены, афиша, любые актуальные данные, события.
-Поиск НЕ НУЖЕН для: обычный разговор, написать текст/код, объяснения понятий, математика, личные вопросы.
+Поиск НУЖЕН: новости, погода, курсы валют, спорт (результаты/расписание/счёт/матчи), цены, афиша, любые актуальные данные.
+Поиск НЕ НУЖЕН: обычный разговор, написать текст/код, объяснения понятий, математика, личные вопросы.
 
 Если поиск нужен — верни JSON:
 {{"search": true, "query": "поисковый запрос", "topic": "sports|news|weather|finance|general"}}
@@ -327,6 +358,11 @@ async def smart_search(user_text: str) -> str:
     query = data.get("query", user_text)
     topic = data.get("topic", "general")
 
+    # Добавляем дату если запрос про текущие события
+    text_lower = user_text.lower()
+    if any(kw in text_lower for kw in DATE_KEYWORDS):
+        query = f"{query} {today_str}"
+
     domain_map = {
         "sports": SPORTS_DOMAINS,
         "news": NEWS_DOMAINS,
@@ -336,26 +372,6 @@ async def smart_search(user_text: str) -> str:
     domains = domain_map.get(topic)  # None = общий поиск без фильтра
 
     return await search_web(query, include_domains=domains)
-
-
-async def search_web(query: str, include_domains: list = None, max_results: int = 5) -> str:
-    """Поиск через Tavily с опциональной фильтрацией по доменам."""
-    try:
-        kwargs = {"query": query, "max_results": max_results}
-        if include_domains:
-            kwargs["include_domains"] = include_domains
-
-        result = tavily_client.search(**kwargs)
-        texts = []
-        for r in result.get("results", []):
-            title = r.get("title", "")
-            content = r.get("content", "")[:400]
-            url = r.get("url", "")
-            texts.append(f"[{title}]\n{content}\nИсточник: {url}")
-        return "\n\n".join(texts) if texts else ""
-    except Exception as e:
-        print(f"search_web error: {e}")
-        return ""
 
 
 # ─────────────────────────────────────────────
@@ -500,7 +516,7 @@ async def list_calendar_events(date):
 
 async def get_weather():
     try:
-        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d %B %Y")
+        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
         raw = await search_web(
             f"погода Набережные Челны прогноз сегодня {today}",
             include_domains=WEATHER_DOMAINS,
@@ -512,8 +528,8 @@ async def get_weather():
             model="claude-opus-4-5",
             max_tokens=150,
             system=f"Сегодня {today}. Из текста извлеки прогноз погоды на СЕГОДНЯ для Набережных Челнов. "
-                   f"Укажи: утром, днем, вечером температуру, максимальную и минимальную за день, что надеть. "
-                   f"Ответ в 3-4 строки. Не пиши исторические данные.",
+                   "Укажи температуру утром/днём/вечером, максимум и минимум за день, что надеть. "
+                   "Отвечай строго по данным из текста, 3-4 строки. Не додумывай.",
             messages=[{"role": "user", "content": raw}]
         )
         return response.content[0].text.strip()
@@ -524,8 +540,9 @@ async def get_weather():
 
 async def get_currency():
     try:
+        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
         raw = await search_web(
-            "курс доллара евро киргизский сом рубль ЦБ РФ сегодня",
+            f"курс доллара евро киргизский сом рубль ЦБ РФ {today}",
             include_domains=FINANCE_DOMAINS,
             max_results=3
         )
@@ -535,7 +552,8 @@ async def get_currency():
             model="claude-opus-4-5",
             max_tokens=100,
             system="Из текста извлеки актуальные курсы валют к рублю. Нужны: USD, EUR, KGS. "
-                   "Формат:\nUSD: XX.XX руб\nEUR: XX.XX руб\nKGS: X.XX руб\nТолько эти три строки.",
+                   "Формат строго:\nUSD: XX.XX руб\nEUR: XX.XX руб\nKGS: X.XX руб\n"
+                   "Только эти три строки. Не додумывай цифры.",
             messages=[{"role": "user", "content": raw}]
         )
         return response.content[0].text.strip()
@@ -546,8 +564,9 @@ async def get_currency():
 
 async def get_news():
     try:
+        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
         raw = await search_web(
-            "главные новости России сегодня",
+            f"главные новости России {today}",
             include_domains=NEWS_DOMAINS,
             max_results=5
         )
@@ -556,8 +575,8 @@ async def get_news():
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=200,
-            system="Из текста выбери 3 самые важные новости дня. Каждую напиши одним коротким предложением. "
-                   "Формат:\n- Текст новости\n- Текст новости\n- Текст новости\nБез источников и ссылок.",
+            system="Из текста выбери 3 самые важные новости. Каждую перескажи одним предложением своими словами. "
+                   "Формат:\n- Новость\n- Новость\n- Новость\nТолько то что есть в тексте. Без ссылок.",
             messages=[{"role": "user", "content": raw}]
         )
         return response.content[0].text.strip()
@@ -978,10 +997,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(assistant_message)
     os.makedirs("voice_files", exist_ok=True)
     voice_path = f"voice_files/response_{update.message.from_user.id}.mp3"
-    await text_to_voice(assistant_message, voice_path)
-    with open(voice_path, "rb") as voice_file:
-        await update.message.reply_voice(voice=voice_file)
-    os.remove(voice_path)
+    try:
+        await text_to_voice(assistant_message, voice_path)
+        with open(voice_path, "rb") as voice_file:
+            await update.message.reply_voice(voice=voice_file)
+        os.remove(voice_path)
+    except Exception as e:
+        print(f"TTS error: {e}")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -994,7 +1016,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     await update.message.reply_text("Думаю...")
 
-    # ── Сначала проверяем структурированные действия ──
+    # ── Структурированные действия ──
     action_data = await parse_action(text, user_id)
 
     if action_data.get("action") == "calendar":
@@ -1009,10 +1031,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     if action_data.get("action") == "delete_calendar":
         await update.message.reply_text("Удаляю из Google Calendar...")
-        result = await delete_calendar_event(
-            title=action_data["title"],
-            date=action_data["date"]
-        )
+        result = await delete_calendar_event(title=action_data["title"], date=action_data["date"])
         await update.message.reply_text(result)
         return
 
@@ -1043,28 +1062,22 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         try:
             cron = await parse_cron(action_data["description"])
             reminder_id = save_recurring_reminder(
-                user_id, chat_id,
-                action_data["text"],
-                cron,
-                action_data["description"]
+                user_id, chat_id, action_data["text"], cron, action_data["description"]
             )
             cron_parts = cron.split()
             scheduler.add_job(
                 send_reminder,
                 trigger=CronTrigger(
-                    minute=cron_parts[0],
-                    hour=cron_parts[1],
-                    day=cron_parts[2],
-                    month=cron_parts[3],
-                    day_of_week=cron_parts[4],
-                    timezone="Europe/Moscow"
+                    minute=cron_parts[0], hour=cron_parts[1],
+                    day=cron_parts[2], month=cron_parts[3],
+                    day_of_week=cron_parts[4], timezone="Europe/Moscow"
                 ),
                 args=[chat_id, action_data["text"]],
                 id=f"recurring_{reminder_id}"
             )
             await update.message.reply_text(
-                f"🔁 Повторяющееся напоминание установлено!\n{action_data['description']}\n"
-                f"{action_data['text']}\nID: {reminder_id}"
+                f"🔁 Повторяющееся напоминание установлено!\n"
+                f"{action_data['description']}\n{action_data['text']}\nID: {reminder_id}"
             )
             return
         except Exception as e:
@@ -1216,26 +1229,44 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     # ── Умный поиск ──
     search_result = await smart_search(text)
     if search_result:
-        await update.message.reply_text("🔍 Ищу в интернете...")
+        await update.message.reply_text("🔍 Нашёл информацию, формирую ответ...")
 
     # ── Ответ Claude ──
-    history = get_history(user_id)
-    user_content = text
+    # Два разных системных промпта: с поиском и без.
+    # Когда есть данные поиска — Claude жёстко привязан к ним и не может додумывать факты.
+    tz = pytz.timezone("Europe/Moscow")
+    now_str = datetime.now(tz).strftime("%d.%m.%Y %H:%M")
+
     if search_result:
-        user_content = (
-            f"{text}\n\n"
-            f"Результаты поиска в интернете (используй эти данные как основу ответа):\n"
-            f"{search_result}"
+        system_prompt = (
+            f"Ты личный помощник. Отвечай на русском языке.\n"
+            f"Сейчас {now_str} МСК.\n\n"
+            f"ПРАВИЛО: Отвечай СТРОГО на основе результатов поиска, которые даны в сообщении пользователя.\n"
+            f"ЗАПРЕЩЕНО додумывать команды, счета, цены, даты и любые конкретные факты.\n"
+            f"Если нужных данных в поиске нет — честно скажи об этом.\n"
+            f"Используй эмодзи где уместно."
         )
+        user_content = (
+            f"Вопрос: {text}\n\n"
+            f"=== РЕЗУЛЬТАТЫ ПОИСКА (отвечай только на их основе) ===\n"
+            f"{search_result}\n"
+            f"======================================================="
+        )
+    else:
+        system_prompt = (
+            f"Ты личный помощник. Отвечай на русском языке.\n"
+            f"Сейчас {now_str} МСК.\n"
+            f"Давай конкретные ответы. Используй эмодзи где уместно."
+        )
+        user_content = text
+
+    history = get_history(user_id)
     history.append({"role": "user", "content": user_content})
 
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=2048,
-        system=f"""Ты личный помощник. Отвечай на русском языке.
-Сегодняшняя дата и время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%d.%m.%Y %H:%M')} (МСК).
-Если тебе предоставлены результаты поиска — используй их, доверяй им и отвечай на их основе.
-Давай конкретные ответы без лишних оговорок. Используй эмодзи где уместно.""",
+        system=system_prompt,
         messages=history
     )
     assistant_message = response.content[0].text
@@ -1287,12 +1318,9 @@ def main():
                 scheduler.add_job(
                     send_reminder,
                     trigger=CronTrigger(
-                        minute=cron_parts[0],
-                        hour=cron_parts[1],
-                        day=cron_parts[2],
-                        month=cron_parts[3],
-                        day_of_week=cron_parts[4],
-                        timezone="Europe/Moscow"
+                        minute=cron_parts[0], hour=cron_parts[1],
+                        day=cron_parts[2], month=cron_parts[3],
+                        day_of_week=cron_parts[4], timezone="Europe/Moscow"
                     ),
                     args=[chat_id, text],
                     id=f"recurring_{reminder_id}"
