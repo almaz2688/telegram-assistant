@@ -51,13 +51,11 @@ TECH_DOMAINS = ["techcrunch.com", "habr.com", "vc.ru", "wired.com", "theverge.co
 CRYPTO_DOMAINS = ["coindesk.com", "cointelegraph.com", "decrypt.co", "bits.media", "cryptonews.com"]
 REALTY_DOMAINS = ["cian.ru", "realty.rbc.ru", "bn.ru", "irn.ru", "domclick.ru"]
 
-# Ключевые слова — при их наличии дата подставляется в поисковый запрос
 DATE_KEYWORDS = [
     "сегодня", "today", "сейчас", "now", "играет", "матч", "матчи",
     "расписание", "результат", "счёт", "погода", "курс", "новости"
 ]
 
-# Цитаты великих предпринимателей, инвесторов и управленцев
 ENTREPRENEUR_QUOTES = [
     ("Ваше время ограничено, не тратьте его, живя чужой жизнью.", "Стив Джобс"),
     ("Я убеждён, что примерно половина того, что отделяет успешных предпринимателей от неуспешных — это чистое упорство.", "Стив Джобс"),
@@ -76,40 +74,201 @@ ENTREPRENEUR_QUOTES = [
     ("Менеджмент — это делать вещи правильно. Лидерство — это делать правильные вещи.", "Питер Друкер"),
     ("Результаты достигаются путём использования возможностей, а не решения проблем.", "Питер Друкер"),
     ("Единственный способ делать великую работу — любить то, что делаешь.", "Стив Джобс"),
-    ("Я никогда не учился на своих успехах. Я учился только на провалах.", "Сомос Уолтон"),
     ("Высокие ожидания — ключ к всему.", "Сэм Уолтон"),
     ("Капитал — это не деньги. Это разум.", "Генри Форд"),
     ("Неудача — это просто возможность начать снова, но более умело.", "Генри Форд"),
     ("Если вы думаете, что можете, — вы правы. Если думаете, что не можете, — тоже правы.", "Генри Форд"),
-    ("Самая опасная идея в бизнесе — думать, что вы знаете, чего хочет клиент.", "Питер Друкер"),
     ("Деньги — плохой хозяин, но хороший слуга.", "Фрэнсис Бэкон"),
     ("Не бойтесь отказаться от хорошего ради великого.", "Джон Рокфеллер"),
     ("Дружба, основанная на бизнесе, лучше, чем бизнес, основанный на дружбе.", "Джон Рокфеллер"),
     ("Секрет успеха в постоянстве цели.", "Бенджамин Дизраэли"),
     ("Возможности умножаются по мере их использования.", "Сунь Цзы"),
     ("Победа любит подготовку.", "Наполеон Бонапарт"),
-    ("В долгосрочной перспективе мы все мертвы. Действуй сейчас.", "Джон Мейнард Кейнс"),
     ("Не ждите. Время никогда не будет идеальным.", "Наполеон Хилл"),
     ("За каждой удачей стоит много неудач.", "Илон Маск"),
     ("Когда что-то достаточно важно, вы делаете это, даже если шансы не в вашу пользу.", "Илон Маск"),
     ("Провал — это вариант. Если вы не терпите неудач, значит, вы недостаточно инновационны.", "Илон Маск"),
     ("Упорство — самое важное качество предпринимателя.", "Илон Маск"),
     ("Я всегда выбирал людей умнее себя.", "Ли Якокка"),
-    ("Если хочешь идти быстро — иди один. Если хочешь идти далеко — иди вместе.", "Африканская пословица"),
     ("Лучшие инвестиции — в себя.", "Бенджамин Франклин"),
     ("Знание — сила. Но применённое знание — это власть.", "Фрэнсис Бэкон"),
     ("Клиент всегда прав — особенно когда он уходит к конкурентам.", "Маршалл Филд"),
-    ("Не нанимайте людей, которым нужно управлять. Нанимайте тех, кто сам знает, что делать.", "Стив Джобс"),
     ("Доверие строится годами, разрушается за минуты.", "Уоррен Баффет"),
     ("Я предпочитаю приблизительно правильный ответ, чем точно неправильный.", "Чарли Мангер"),
     ("Инвертируй, всегда инвертируй.", "Чарли Мангер"),
     ("Покупай страх, продавай жадность.", "Натан Ротшильд"),
-    ("Первое поколение зарабатывает, второе тратит, третье разоряется.", "Эндрю Карнеги"),
     ("Человек, умирающий богатым, умирает опозоренным.", "Эндрю Карнеги"),
     ("Успех — это умение идти от неудачи к неудаче, не теряя энтузиазма.", "Уинстон Черчилль"),
     ("Сначала они тебя не замечают, потом смеются над тобой, потом борются с тобой. Потом ты побеждаешь.", "Махатма Ганди"),
     ("Стратегия без тактики — самый медленный путь к победе. Тактика без стратегии — шум перед поражением.", "Сунь Цзы"),
+    ("Первое поколение зарабатывает, второе тратит, третье разоряется.", "Эндрю Карнеги"),
+    ("В долгосрочной перспективе мы все мертвы. Действуй сейчас.", "Джон Мейнард Кейнс"),
+    ("Не нанимайте людей, которым нужно управлять. Нанимайте тех, кто сам знает, что делать.", "Стив Джобс"),
+    ("Самая опасная идея в бизнесе — думать, что вы знаете, чего хочет клиент.", "Питер Друкер"),
+    ("Если хочешь идти быстро — иди один. Если хочешь идти далеко — иди вместе.", "Африканская пословица"),
+    ("Не количество часов в работе, а количество работы в часах.", "Эштон Катчер"),
 ]
+
+CAPABILITIES_TEXT = """🤖 ЧТО УМЕЕТ ТВОЙ ПОМОЩНИК
+
+📅 КАЛЕНДАРЬ
+• Добавить событие в Google Calendar
+• Удалить событие из календаря
+• Показать события на любую дату
+
+⏰ НАПОМИНАНИЯ
+• Одноразовые напоминания (в любое время)
+• Повторяющиеся напоминания (каждый день, по дням недели, по числам)
+• Управление списком напоминаний
+
+🛒 СПИСОК ПОКУПОК
+• Добавить товары в список
+• Показать текущий список
+• Удалить отдельный товар или очистить всё
+
+👥 КОНТАКТЫ
+• Сохранить контакт (имя, Telegram, телефон)
+• Найти контакт по имени
+• Показать всю книгу контактов
+• Удалить контакт
+
+💬 TELEGRAM-СООБЩЕНИЯ
+• Написать сообщение контакту прямо сейчас
+• Запланировать сообщение на нужное время
+
+🔍 ПОИСК В ИНТЕРНЕТЕ
+• Новости и актуальные события
+• Погода в любом городе
+• Курсы валют
+• Спорт: расписание, результаты, счёт
+• Любые вопросы требующие свежих данных
+
+🖼 ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ
+• Создать картинку по описанию (DALL-E 3)
+
+🎤 ГОЛОС
+• Принимать голосовые сообщения
+• Отвечать голосом на любой запрос
+
+📷 ФОТО
+• Анализировать и описывать фотографии
+
+☀️ УТРЕННИЙ БРИФИНГ (каждый день в 6:00)
+• Календарь на день
+• Погода в Челнах
+• Курсы валют (USD, EUR, KGS)
+• 5 новостей: вайб-кодинг, ИИ, экономика, крипта, недвижимость
+• Цитата великого предпринимателя
+
+💬 УМНЫЙ РАЗГОВОР
+• Отвечает на любые вопросы
+• Помогает с текстами, идеями, анализом
+• Помнит историю разговора"""
+
+INSTRUCTIONS_TEXT = """📖 ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ
+
+━━━━━━━━━━━━━━━━
+📅 КАЛЕНДАРЬ
+
+Добавить событие:
+"Добавь встречу с партнёром 15 апреля в 14:00"
+"Запиши врача на 20 апреля в 10 утра"
+
+Посмотреть события:
+"Что у меня запланировано на завтра?"
+"Покажи события на 15 апреля"
+
+Удалить событие:
+"Удали встречу с партнёром 15 апреля"
+
+━━━━━━━━━━━━━━━━
+⏰ НАПОМИНАНИЯ
+
+Одноразовое:
+"Напомни позвонить маме в 18:00"
+"Напомни про оплату счёта 30 апреля в 9:00"
+
+Повторяющееся:
+"Напоминай каждый день в 8:00 выпить воду"
+"Каждую пятницу в 17:00 напоминай про отчёт"
+"Каждое 1 число месяца в 10:00 — оплата аренды"
+
+Управление:
+/reminders — список всех напоминаний
+"Удали напоминание #3"
+
+━━━━━━━━━━━━━━━━
+🛒 СПИСОК ПОКУПОК
+
+"Добавь в список молоко, хлеб и яйца"
+"Что у меня в списке покупок?"
+"Удали молоко из списка"
+"Очисти список покупок"
+/shopping — быстро посмотреть список
+
+━━━━━━━━━━━━━━━━
+👥 КОНТАКТЫ
+
+Добавить:
+/contact Вася Петров @vasya 89991234567
+"Сохрани контакт: Иван Иванов, телеграм @ivan"
+
+Найти:
+"Найди контакт Вася"
+/contacts — все контакты
+
+Удалить:
+"Удали контакт Вася"
+
+━━━━━━━━━━━━━━━━
+💬 ОТПРАВКА СООБЩЕНИЙ
+
+Сейчас:
+"Напиши Васе: увидимся в 7 вечера"
+"Отправь Ивану что встреча перенесена"
+
+По расписанию:
+"Напиши Васе завтра в 9 утра: доброе утро!"
+"В пятницу в 18:00 отправь Ивану напоминание про встречу"
+
+⚠️ Контакт должен быть сохранён заранее
+
+━━━━━━━━━━━━━━━━
+🔍 ПОИСК И ВОПРОСЫ
+
+Просто пишите или говорите голосом:
+"Какой курс доллара сегодня?"
+"Кто играет в КХЛ сегодня?"
+"Погода в Москве на выходные"
+"Последние новости про биткоин"
+"Объясни что такое вайб-кодинг"
+
+━━━━━━━━━━━━━━━━
+🎤 ГОЛОСОВЫЕ СООБЩЕНИЯ
+
+Просто отправьте голосовое — помощник поймёт и ответит тоже голосом.
+
+━━━━━━━━━━━━━━━━
+📷 ФОТО
+
+Отправьте фото (можно с подписью):
+• Без подписи — опишет что на фото
+• С подписью — ответит на ваш вопрос про фото
+
+━━━━━━━━━━━━━━━━
+🖼 КАРТИНКИ
+
+"Нарисуй закат над горами"
+"Сгенерируй логотип для кофейни"
+"Создай изображение: офис будущего"
+
+━━━━━━━━━━━━━━━━
+⚙️ СЛУЖЕБНЫЕ КОМАНДЫ
+
+/briefing — получить утренний брифинг прямо сейчас
+/forget — очистить историю разговора
+/help — что умеет помощник
+/instructions — эта инструкция"""
 
 
 # ─────────────────────────────────────────────
@@ -343,7 +502,6 @@ def mark_scheduled_message_sent(msg_id):
 # ─────────────────────────────────────────────
 
 async def search_web(query: str, include_domains: list = None, max_results: int = 5) -> str:
-    """Поиск через Tavily с опциональной фильтрацией по доменам."""
     try:
         kwargs = {"query": query, "max_results": max_results}
         if include_domains:
@@ -362,10 +520,6 @@ async def search_web(query: str, include_domains: list = None, max_results: int 
 
 
 async def smart_search(user_text: str) -> str:
-    """
-    Claude решает нужен ли поиск, формирует запрос и тематику.
-    Дата автоматически добавляется к запросам про текущие события.
-    """
     tz = pytz.timezone("Europe/Moscow")
     now = datetime.now(tz)
     now_str = now.strftime("%d.%m.%Y %H:%M")
@@ -552,35 +706,19 @@ async def list_calendar_events(date):
 
 
 # ─────────────────────────────────────────────
-#  УТРЕННИЙ БРИФИНГ — НОВОСТИ (5 категорий)
+#  УТРЕННИЙ БРИФИНГ
 # ─────────────────────────────────────────────
 
 async def get_news_by_topic(topic_query: str, topic_label: str,
                             domains: list, today: str) -> str:
-    """
-    Ищет новость по конкретной теме.
-    Если специализированные домены не дали результат — fallback на общий поиск.
-    """
     try:
-        # Первая попытка — со специализированными доменами
         raw = ""
         if domains:
-            raw = await search_web(
-                f"{topic_query} {today}",
-                include_domains=domains,
-                max_results=3
-            )
-
-        # Fallback — общий поиск без фильтра доменов
+            raw = await search_web(f"{topic_query} {today}", include_domains=domains, max_results=3)
         if not raw:
-            raw = await search_web(
-                f"{topic_query} {today}",
-                max_results=3
-            )
-
+            raw = await search_web(f"{topic_query} {today}", max_results=3)
         if not raw:
             return f"Нет данных по теме: {topic_label}"
-
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=120,
@@ -596,12 +734,10 @@ async def get_news_by_topic(topic_query: str, topic_label: str,
 
 
 async def get_five_news(today: str) -> dict:
-    """Собирает 5 новостей по категориям."""
     topics = [
         {
             "key": "vibe_coding",
             "label": "Вайб-кодинг",
-            # Английский запрос + без ограничения доменов — тема глобальная
             "query": "vibe coding AI programming tools cursor windsurf latest news",
             "domains": None,
             "emoji": "💻",
@@ -635,7 +771,6 @@ async def get_five_news(today: str) -> dict:
             "emoji": "🏠",
         },
     ]
-
     results = {}
     for t in topics:
         news_text = await get_news_by_topic(
@@ -645,31 +780,21 @@ async def get_five_news(today: str) -> dict:
             today=today,
         )
         results[t["key"]] = {"emoji": t["emoji"], "label": t["label"], "text": news_text}
-
     return results
 
 
 async def get_weather():
     try:
         today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
-
-        # Первая попытка — специализированные погодные сайты
         raw = await search_web(
             f"погода Набережные Челны {today}",
             include_domains=WEATHER_DOMAINS,
             max_results=3
         )
-
-        # Fallback — общий поиск
         if not raw:
-            raw = await search_web(
-                f"погода Набережные Челны прогноз сегодня",
-                max_results=3
-            )
-
+            raw = await search_web("погода Набережные Челны прогноз сегодня", max_results=3)
         if not raw:
             return "Погода недоступна"
-
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=150,
@@ -687,20 +812,15 @@ async def get_weather():
 async def get_currency():
     try:
         today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
-
         raw = await search_web(
             f"курс доллара евро киргизский сом рубль ЦБ РФ {today}",
             include_domains=FINANCE_DOMAINS,
             max_results=3
         )
-
-        # Fallback
         if not raw:
             raw = await search_web("курс доллара евро рубль сегодня", max_results=3)
-
         if not raw:
             return "Курсы недоступны"
-
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=100,
@@ -732,15 +852,12 @@ async def send_morning_briefing(chat_id):
         weather = await get_weather()
         currency = await get_currency()
         five_news = await get_five_news(today_str)
-
-        # Случайная цитата великого предпринимателя
         quote_text, quote_author = random.choice(ENTREPRENEUR_QUOTES)
 
         briefing = "☀️ Доброе утро, Алмаз!\n\n"
         briefing += f"📆 {day_name}, {date_str}\n"
         briefing += "━━━━━━━━━━━━━━━━\n\n"
 
-        # Календарь
         briefing += "📅 КАЛЕНДАРЬ НА СЕГОДНЯ:\n"
         if events:
             for event in events:
@@ -758,27 +875,22 @@ async def send_morning_briefing(chat_id):
         else:
             briefing += "  Событий нет\n"
 
-        # Погода
         briefing += "\n🌤 ПОГОДА В ЧЕЛНАХ:\n"
         for line in weather.split("\n"):
             if line.strip():
                 briefing += f"  {line}\n"
 
-        # Курсы валют
         briefing += "\n💰 КУРСЫ ВАЛЮТ:\n"
         for line in currency.split("\n"):
             if line.strip():
                 briefing += f"  {line}\n"
 
-        # 5 новостей по категориям
         briefing += "\n📰 НОВОСТИ:\n"
-        news_order = ["vibe_coding", "ai", "economy", "crypto", "realty"]
-        for i, key in enumerate(news_order, start=1):
+        for i, key in enumerate(["vibe_coding", "ai", "economy", "crypto", "realty"], start=1):
             item = five_news[key]
             briefing += f"\n  {i}. {item['emoji']} {item['label'].upper()}\n"
             briefing += f"  {item['text']}\n"
 
-        # Цитата великого
         briefing += "\n━━━━━━━━━━━━━━━━\n"
         briefing += f"💎 «{quote_text}»\n"
         briefing += f"    — {quote_author}"
@@ -798,9 +910,9 @@ async def find_recipient(client, contact):
         return contact["username"]
     if contact.get("phone"):
         try:
-            phone = contact["phone"]
             result = await client(ImportContactsRequest([
-                InputPhoneContact(client_id=0, phone=phone, first_name=contact["name"], last_name="")
+                InputPhoneContact(client_id=0, phone=contact["phone"],
+                                  first_name=contact["name"], last_name="")
             ]))
             if result.users:
                 return result.users[0]
@@ -980,17 +1092,27 @@ async def send_reminder(chat_id, text):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     await update.message.reply_text(
-        f"Привет! Я твой личный помощник\n\n"
+        f"Привет! Я твой личный помощник 🤖\n\n"
         f"Твой chat_id: {chat_id}\n\n"
         "Быстрые команды:\n"
+        "/help — что умею\n"
+        "/instructions — как пользоваться\n"
         "/contact Имя @username телефон — добавить контакт\n"
         "/contacts — все контакты\n"
         "/shopping — список покупок\n"
-        "/reminders — повторяющиеся напоминания\n"
-        "/briefing — получить брифинг сейчас\n"
+        "/reminders — напоминания\n"
+        "/briefing — утренний брифинг\n"
         "/forget — очистить историю\n\n"
-        "Или просто говорите голосом что нужно сделать!"
+        "Или просто пиши / говори голосом что нужно сделать!"
     )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(CAPABILITIES_TEXT)
+
+
+async def cmd_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(INSTRUCTIONS_TEXT)
 
 
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1013,10 +1135,7 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    name_parts = []
-    username = None
-    phone = None
-
+    name_parts, username, phone = [], None, None
     for arg in args:
         if arg.startswith("@"):
             username = arg
@@ -1101,9 +1220,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(file_path)
     with open(file_path, "rb") as audio_file:
         transcript = openai_client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            language="ru"
+            model="whisper-1", file=audio_file, language="ru"
         )
     text = transcript.text
     await update.message.reply_text(f"Ты сказал: {text}")
@@ -1139,8 +1256,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice_path = f"voice_files/response_{update.message.from_user.id}.mp3"
     try:
         await text_to_voice(assistant_message, voice_path)
-        with open(voice_path, "rb") as voice_file:
-            await update.message.reply_voice(voice=voice_file)
+        with open(voice_path, "rb") as vf:
+            await update.message.reply_voice(voice=vf)
         os.remove(voice_path)
     except Exception as e:
         print(f"TTS error: {e}")
@@ -1156,7 +1273,6 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     await update.message.reply_text("Думаю...")
 
-    # ── Структурированные действия ──
     action_data = await parse_action(text, user_id)
 
     if action_data.get("action") == "calendar":
@@ -1185,11 +1301,8 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         try:
             tz = pytz.timezone("Europe/Moscow")
             reminder_time = tz.localize(datetime.strptime(action_data["datetime"], "%Y-%m-%d %H:%M"))
-            scheduler.add_job(
-                send_reminder,
-                trigger=DateTrigger(run_date=reminder_time),
-                args=[chat_id, action_data["text"]]
-            )
+            scheduler.add_job(send_reminder, trigger=DateTrigger(run_date=reminder_time),
+                              args=[chat_id, action_data["text"]])
             await update.message.reply_text(
                 f"⏰ Напоминание установлено!\n{action_data['datetime']}\n{action_data['text']}"
             )
@@ -1270,13 +1383,8 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         return
 
     if action_data.get("action") == "contact_save":
-        save_contact(
-            user_id,
-            name=action_data.get("name"),
-            username=action_data.get("username"),
-            phone=action_data.get("phone"),
-            notes=action_data.get("notes")
-        )
+        save_contact(user_id, name=action_data.get("name"), username=action_data.get("username"),
+                     phone=action_data.get("phone"), notes=action_data.get("notes"))
         await update.message.reply_text(f"Контакт сохранён: {action_data.get('name')}")
         return
 
@@ -1342,12 +1450,8 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             tz = pytz.timezone("Europe/Moscow")
             send_time = tz.localize(datetime.strptime(send_at, "%Y-%m-%d %H:%M"))
             msg_id = save_scheduled_message(user_id, contact_name, message, send_at)
-            scheduler.add_job(
-                send_scheduled_message,
-                trigger=DateTrigger(run_date=send_time),
-                args=[msg_id, contact, message],
-                id=f"scheduled_msg_{msg_id}"
-            )
+            scheduler.add_job(send_scheduled_message, trigger=DateTrigger(run_date=send_time),
+                              args=[msg_id, contact, message], id=f"scheduled_msg_{msg_id}")
             await update.message.reply_text(
                 f"📅 Сообщение запланировано!\nКому: {contact['name']}\nКогда: {send_at}\nТекст:\n{message}"
             )
@@ -1419,8 +1523,8 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     voice_path = f"voice_files/response_{user_id}.mp3"
     try:
         await text_to_voice(assistant_message, voice_path)
-        with open(voice_path, "rb") as voice_file:
-            await update.message.reply_voice(voice=voice_file)
+        with open(voice_path, "rb") as vf:
+            await update.message.reply_voice(voice=vf)
         os.remove(voice_path)
     except Exception as e:
         print(f"TTS error: {e}")
@@ -1437,6 +1541,8 @@ def main():
     bot_instance = app.bot
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("instructions", cmd_instructions))
     app.add_handler(CommandHandler("forget", forget))
     app.add_handler(CommandHandler("contact", cmd_contact))
     app.add_handler(CommandHandler("contacts", cmd_contacts))
@@ -1477,6 +1583,8 @@ def main():
 
         await application.bot.set_my_commands([
             BotCommand("start", "Главное меню"),
+            BotCommand("help", "Что умеет помощник"),
+            BotCommand("instructions", "Инструкция по использованию"),
             BotCommand("contact", "Добавить контакт"),
             BotCommand("contacts", "Все контакты"),
             BotCommand("shopping", "Список покупок"),
