@@ -42,6 +42,12 @@ bot_instance = None
 
 DB_PATH = "/app/data/memory.db"
 
+# Домены для разных тематик поиска
+SPORTS_DOMAINS = ["championat.com", "sports.ru", "khl.ru", "sport-express.ru", "matchtv.ru", "nhl.com", "uefa.com"]
+NEWS_DOMAINS = ["ria.ru", "tass.ru", "rbc.ru", "lenta.ru", "iz.ru", "kommersant.ru"]
+WEATHER_DOMAINS = ["pogoda.ru", "gismeteo.ru", "weather.com", "rp5.ru"]
+FINANCE_DOMAINS = ["rbc.ru", "banki.ru", "cbr.ru", "finance.mail.ru", "investing.com"]
+
 MOTIVATIONAL_QUOTES = [
     "Успех — это сумма небольших усилий, повторяемых день за днём.",
     "Не жди идеального момента. Возьми момент и сделай его идеальным.",
@@ -54,6 +60,11 @@ MOTIVATIONAL_QUOTES = [
     "Не бойся медленно идти, бойся стоять на месте.",
     "Лучший способ предсказать будущее — создать его.",
 ]
+
+
+# ─────────────────────────────────────────────
+#  БД
+# ─────────────────────────────────────────────
 
 def init_db():
     os.makedirs("/app/data", exist_ok=True)
@@ -113,12 +124,14 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 def save_message(user_id, role, content):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("INSERT INTO messages (user_id, role, content) VALUES (?, ?, ?)", (user_id, role, content))
     conn.commit()
     conn.close()
+
 
 def get_history(user_id, limit=20):
     conn = sqlite3.connect(DB_PATH)
@@ -128,12 +141,14 @@ def get_history(user_id, limit=20):
     conn.close()
     return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
 
+
 def clear_history(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM messages WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
+
 
 def add_shopping_items(user_id, items):
     conn = sqlite3.connect(DB_PATH)
@@ -143,6 +158,7 @@ def add_shopping_items(user_id, items):
     conn.commit()
     conn.close()
 
+
 def get_shopping_list(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -151,6 +167,7 @@ def get_shopping_list(user_id):
     conn.close()
     return [row[0] for row in rows]
 
+
 def delete_shopping_item(user_id, item):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -158,12 +175,14 @@ def delete_shopping_item(user_id, item):
     conn.commit()
     conn.close()
 
+
 def clear_shopping_list(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM shopping_list WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
+
 
 def save_contact(user_id, name, username=None, phone=None, notes=None):
     conn = sqlite3.connect(DB_PATH)
@@ -179,6 +198,7 @@ def save_contact(user_id, name, username=None, phone=None, notes=None):
     conn.commit()
     conn.close()
 
+
 def find_contact(user_id, name):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -190,6 +210,7 @@ def find_contact(user_id, name):
         return {"name": row[0], "username": row[1], "phone": row[2], "notes": row[3]}
     return None
 
+
 def get_all_contacts(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -198,12 +219,14 @@ def get_all_contacts(user_id):
     conn.close()
     return [{"name": r[0], "username": r[1], "phone": r[2], "notes": r[3]} for r in rows]
 
+
 def delete_contact(user_id, name):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM contacts WHERE user_id=? AND name LIKE ?", (user_id, f"%{name}%"))
     conn.commit()
     conn.close()
+
 
 def save_recurring_reminder(user_id, chat_id, text, cron, description):
     conn = sqlite3.connect(DB_PATH)
@@ -215,6 +238,7 @@ def save_recurring_reminder(user_id, chat_id, text, cron, description):
     conn.close()
     return reminder_id
 
+
 def get_recurring_reminders(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -222,6 +246,7 @@ def get_recurring_reminders(user_id):
     rows = c.fetchall()
     conn.close()
     return [{"id": r[0], "text": r[1], "cron": r[2], "description": r[3]} for r in rows]
+
 
 def get_all_recurring_reminders():
     conn = sqlite3.connect(DB_PATH)
@@ -231,12 +256,14 @@ def get_all_recurring_reminders():
     conn.close()
     return rows
 
+
 def delete_recurring_reminder(user_id, reminder_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("DELETE FROM recurring_reminders WHERE user_id=? AND id=?", (user_id, reminder_id))
     conn.commit()
     conn.close()
+
 
 def save_scheduled_message(user_id, username, message, send_at):
     conn = sqlite3.connect(DB_PATH)
@@ -248,12 +275,92 @@ def save_scheduled_message(user_id, username, message, send_at):
     conn.close()
     return msg_id
 
+
 def mark_scheduled_message_sent(msg_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE scheduled_messages SET sent=1 WHERE id=?", (msg_id,))
     conn.commit()
     conn.close()
+
+
+# ─────────────────────────────────────────────
+#  УМНЫЙ ПОИСК
+# ─────────────────────────────────────────────
+
+async def smart_search(user_text: str) -> str:
+    """
+    Claude сам решает:
+    1. Нужен ли поиск
+    2. Какой запрос сформировать
+    3. Какую тематику использовать (спорт / новости / финансы / погода / общий)
+    Возвращает строку с результатами или пустую строку.
+    """
+    now_str = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y %H:%M")
+    try:
+        resp = anthropic_client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=200,
+            system=f"""Сегодня {now_str} (московское время).
+Определи, нужен ли поиск в интернете для ответа на сообщение пользователя.
+
+Поиск НУЖЕН для: новости, погода, курсы валют, спорт (результаты/расписание/счёт), цены, афиша, любые актуальные данные, события.
+Поиск НЕ НУЖЕН для: обычный разговор, написать текст/код, объяснения понятий, математика, личные вопросы.
+
+Если поиск нужен — верни JSON:
+{{"search": true, "query": "поисковый запрос", "topic": "sports|news|weather|finance|general"}}
+
+Если поиск не нужен — верни JSON:
+{{"search": false}}
+
+Только JSON, без пояснений.""",
+            messages=[{"role": "user", "content": user_text}]
+        )
+        data = json.loads(resp.content[0].text.strip())
+    except Exception as e:
+        print(f"smart_search decision error: {e}")
+        return ""
+
+    if not data.get("search"):
+        return ""
+
+    query = data.get("query", user_text)
+    topic = data.get("topic", "general")
+
+    domain_map = {
+        "sports": SPORTS_DOMAINS,
+        "news": NEWS_DOMAINS,
+        "weather": WEATHER_DOMAINS,
+        "finance": FINANCE_DOMAINS,
+    }
+    domains = domain_map.get(topic)  # None = общий поиск без фильтра
+
+    return await search_web(query, include_domains=domains)
+
+
+async def search_web(query: str, include_domains: list = None, max_results: int = 5) -> str:
+    """Поиск через Tavily с опциональной фильтрацией по доменам."""
+    try:
+        kwargs = {"query": query, "max_results": max_results}
+        if include_domains:
+            kwargs["include_domains"] = include_domains
+
+        result = tavily_client.search(**kwargs)
+        texts = []
+        for r in result.get("results", []):
+            title = r.get("title", "")
+            content = r.get("content", "")[:400]
+            url = r.get("url", "")
+            texts.append(f"[{title}]\n{content}\nИсточник: {url}")
+        return "\n\n".join(texts) if texts else ""
+    except Exception as e:
+        print(f"search_web error: {e}")
+        return ""
+
+
+# ─────────────────────────────────────────────
+#  GOOGLE CALENDAR
+# ─────────────────────────────────────────────
 
 def get_calendar_service():
     if not GOOGLE_CREDENTIALS:
@@ -272,6 +379,7 @@ def get_calendar_service():
     except Exception as e:
         print(f"Calendar error: {e}")
         return None
+
 
 async def get_today_events():
     service = get_calendar_service()
@@ -294,65 +402,169 @@ async def get_today_events():
         print(f"Calendar events error: {e}")
         return []
 
+
+async def create_calendar_event(title, start_datetime, reminder_minutes=60):
+    service = get_calendar_service()
+    if not service:
+        return "Google Calendar не подключён"
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        if isinstance(start_datetime, str):
+            start_dt = tz.localize(datetime.strptime(start_datetime, "%Y-%m-%d %H:%M"))
+        else:
+            start_dt = start_datetime
+        end_dt = start_dt + timedelta(hours=1)
+        event = {
+            "summary": title,
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": "Europe/Moscow"},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Europe/Moscow"},
+            "reminders": {
+                "useDefault": False,
+                "overrides": [
+                    {"method": "popup", "minutes": reminder_minutes},
+                    {"method": "popup", "minutes": 1440},
+                ]
+            }
+        }
+        event = service.events().insert(calendarId="primary", body=event).execute()
+        return f"Событие добавлено в Google Calendar!\n{title}\n{start_dt.strftime('%d.%m.%Y %H:%M')}"
+    except Exception as e:
+        return f"Ошибка: {str(e)}"
+
+
+async def delete_calendar_event(title, date):
+    service = get_calendar_service()
+    if not service:
+        return "Google Calendar не подключён"
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        date_dt = datetime.strptime(date, "%Y-%m-%d")
+        time_min = tz.localize(date_dt).isoformat()
+        time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
+        events = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            q=title
+        ).execute()
+        items = events.get("items", [])
+        if not items:
+            return f"Событие не найдено: {title} на {date}"
+        for item in items:
+            service.events().delete(calendarId="primary", eventId=item["id"]).execute()
+        return f"Событие удалено: {title}"
+    except Exception as e:
+        return f"Ошибка: {str(e)}"
+
+
+async def list_calendar_events(date):
+    service = get_calendar_service()
+    if not service:
+        return "Google Calendar не подключён"
+    try:
+        tz = pytz.timezone("Europe/Moscow")
+        date_dt = datetime.strptime(date, "%Y-%m-%d")
+        time_min = tz.localize(date_dt).isoformat()
+        time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
+        events = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+        items = events.get("items", [])
+        if not items:
+            return f"На {date_dt.strftime('%d.%m.%Y')} событий нет"
+        result = f"События на {date_dt.strftime('%d.%m.%Y')}:\n\n"
+        for item in items:
+            start = item["start"].get("dateTime", item["start"].get("date"))
+            if "T" in start:
+                dt = datetime.fromisoformat(start)
+                if dt.tzinfo is None:
+                    dt = tz.localize(dt)
+                else:
+                    dt = dt.astimezone(tz)
+                start_time = dt.strftime("%H:%M")
+            else:
+                start_time = "весь день"
+            result += f"{start_time} — {item['summary']}\n"
+        return result
+    except Exception as e:
+        return f"Ошибка: {str(e)}"
+
+
+# ─────────────────────────────────────────────
+#  УТРЕННИЙ БРИФИНГ
+# ─────────────────────────────────────────────
+
 async def get_weather():
     try:
         today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d %B %Y")
-        result = tavily_client.search(
-            f"погода Набережные Челны прогноз на сегодня {today} температура днем вечером максимальная минимальная",
+        raw = await search_web(
+            f"погода Набережные Челны прогноз сегодня {today}",
+            include_domains=WEATHER_DOMAINS,
             max_results=3
         )
-        raw = ""
-        for r in result.get("results", []):
-            if r.get("content"):
-                raw += r["content"][:500]
         if not raw:
             return "Погода недоступна"
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=150,
-            system=f"Сегодня {today}. Из текста извлеки прогноз погоды на СЕГОДНЯ для Набережных Челнов. Укажи: утром, днем, вечером температуру, максимальную и минимальную за день, что надеть. Ответ в 3-4 строки. Не пиши исторические данные.",
+            system=f"Сегодня {today}. Из текста извлеки прогноз погоды на СЕГОДНЯ для Набережных Челнов. "
+                   f"Укажи: утром, днем, вечером температуру, максимальную и минимальную за день, что надеть. "
+                   f"Ответ в 3-4 строки. Не пиши исторические данные.",
             messages=[{"role": "user", "content": raw}]
         )
         return response.content[0].text.strip()
-    except:
+    except Exception as e:
+        print(f"get_weather error: {e}")
         return "Погода недоступна"
+
 
 async def get_currency():
     try:
-        result = tavily_client.search("курс доллара евро сом киргизский рубль сегодня ЦБ РФ", max_results=3)
-        raw = ""
-        for r in result.get("results", []):
-            if r.get("content"):
-                raw += r["content"][:500]
+        raw = await search_web(
+            "курс доллара евро киргизский сом рубль ЦБ РФ сегодня",
+            include_domains=FINANCE_DOMAINS,
+            max_results=3
+        )
         if not raw:
             return "Курсы недоступны"
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=100,
-            system="Из текста извлеки актуальные курсы валют к рублю. Нужны: USD (доллар), EUR (евро), KGS (киргизский сом). Формат ответа:\nUSD: XX.XX руб\nEUR: XX.XX руб\nKGS: X.XX руб\nТолько эти три строки, без лишнего текста.",
+            system="Из текста извлеки актуальные курсы валют к рублю. Нужны: USD, EUR, KGS. "
+                   "Формат:\nUSD: XX.XX руб\nEUR: XX.XX руб\nKGS: X.XX руб\nТолько эти три строки.",
             messages=[{"role": "user", "content": raw}]
         )
         return response.content[0].text.strip()
-    except:
+    except Exception as e:
+        print(f"get_currency error: {e}")
         return "Курсы недоступны"
+
 
 async def get_news():
     try:
-        result = tavily_client.search("главные новости России сегодня", max_results=5)
-        raw = ""
-        for r in result.get("results", [])[:5]:
-            raw += f"Заголовок: {r['title']}\nСодержание: {r.get('content', '')[:200]}\n\n"
+        raw = await search_web(
+            "главные новости России сегодня",
+            include_domains=NEWS_DOMAINS,
+            max_results=5
+        )
         if not raw:
             return "Новости недоступны"
         response = anthropic_client.messages.create(
             model="claude-opus-4-5",
             max_tokens=200,
-            system="Из текста выбери 3 самые важные новости дня. Каждую напиши одним коротким предложением своими словами. Формат:\n- Текст новости\n- Текст новости\n- Текст новости\nБез источников, ссылок и лишнего текста.",
+            system="Из текста выбери 3 самые важные новости дня. Каждую напиши одним коротким предложением. "
+                   "Формат:\n- Текст новости\n- Текст новости\n- Текст новости\nБез источников и ссылок.",
             messages=[{"role": "user", "content": raw}]
         )
         return response.content[0].text.strip()
-    except:
+    except Exception as e:
+        print(f"get_news error: {e}")
         return "Новости недоступны"
+
 
 async def send_morning_briefing(chat_id):
     try:
@@ -362,7 +574,7 @@ async def send_morning_briefing(chat_id):
         months = ["января", "февраля", "марта", "апреля", "мая", "июня",
                   "июля", "августа", "сентября", "октября", "ноября", "декабря"]
         day_name = days[now.weekday()]
-        date_str = f"{now.day} {months[now.month-1]} {now.year}"
+        date_str = f"{now.day} {months[now.month - 1]} {now.year}"
 
         await bot_instance.send_message(chat_id=chat_id, text="Готовлю утренний брифинг...")
 
@@ -416,6 +628,11 @@ async def send_morning_briefing(chat_id):
         print(f"Briefing error: {e}")
         await bot_instance.send_message(chat_id=chat_id, text=f"Ошибка брифинга: {str(e)}")
 
+
+# ─────────────────────────────────────────────
+#  TELEGRAM USERBOT
+# ─────────────────────────────────────────────
+
 async def find_recipient(client, contact):
     if contact.get("username"):
         return contact["username"]
@@ -439,6 +656,7 @@ async def find_recipient(client, contact):
             print(f"Dialog lookup error: {e}")
     return None
 
+
 async def send_telegram_userbot(contact_info, message):
     try:
         client = TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH)
@@ -456,130 +674,15 @@ async def send_telegram_userbot(contact_info, message):
     except Exception as e:
         return f"Ошибка: {str(e)}"
 
+
 async def send_scheduled_message(msg_id, contact_info, message):
     await send_telegram_userbot(contact_info, message)
     mark_scheduled_message_sent(msg_id)
 
-async def create_calendar_event(title, start_datetime, reminder_minutes=60):
-    service = get_calendar_service()
-    if not service:
-        return "Google Calendar не подключён"
-    try:
-        tz = pytz.timezone("Europe/Moscow")
-        if isinstance(start_datetime, str):
-            start_dt = tz.localize(datetime.strptime(start_datetime, "%Y-%m-%d %H:%M"))
-        else:
-            start_dt = start_datetime
-        end_dt = start_dt + timedelta(hours=1)
-        event = {
-            "summary": title,
-            "start": {"dateTime": start_dt.isoformat(), "timeZone": "Europe/Moscow"},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Europe/Moscow"},
-            "reminders": {
-                "useDefault": False,
-                "overrides": [
-                    {"method": "popup", "minutes": reminder_minutes},
-                    {"method": "popup", "minutes": 1440},
-                ]
-            }
-        }
-        event = service.events().insert(calendarId="primary", body=event).execute()
-        return f"Событие добавлено в Google Calendar!\n{title}\n{start_dt.strftime('%d.%m.%Y %H:%M')}"
-    except Exception as e:
-        return f"Ошибка: {str(e)}"
 
-async def delete_calendar_event(title, date):
-    service = get_calendar_service()
-    if not service:
-        return "Google Calendar не подключён"
-    try:
-        tz = pytz.timezone("Europe/Moscow")
-        date_dt = datetime.strptime(date, "%Y-%m-%d")
-        time_min = tz.localize(date_dt).isoformat()
-        time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
-        events = service.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            q=title
-        ).execute()
-        items = events.get("items", [])
-        if not items:
-            return f"Событие не найдено: {title} на {date}"
-        for item in items:
-            service.events().delete(calendarId="primary", eventId=item["id"]).execute()
-        return f"Событие удалено: {title}"
-    except Exception as e:
-        return f"Ошибка: {str(e)}"
-
-async def list_calendar_events(date):
-    service = get_calendar_service()
-    if not service:
-        return "Google Calendar не подключён"
-    try:
-        tz = pytz.timezone("Europe/Moscow")
-        date_dt = datetime.strptime(date, "%Y-%m-%d")
-        time_min = tz.localize(date_dt).isoformat()
-        time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
-        events = service.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy="startTime"
-        ).execute()
-        items = events.get("items", [])
-        if not items:
-            return f"На {date_dt.strftime('%d.%m.%Y')} событий нет"
-        result = f"События на {date_dt.strftime('%d.%m.%Y')}:\n\n"
-        for item in items:
-            start = item["start"].get("dateTime", item["start"].get("date"))
-            if "T" in start:
-                dt = datetime.fromisoformat(start)
-                if dt.tzinfo is None:
-                    dt = tz.localize(dt)
-                else:
-                    dt = dt.astimezone(tz)
-                start_time = dt.strftime("%H:%M")
-            else:
-                start_time = "весь день"
-            result += f"{start_time} — {item['summary']}\n"
-        return result
-    except Exception as e:
-        return f"Ошибка: {str(e)}"
-
-async def send_reminder(chat_id, text):
-    await bot_instance.send_message(chat_id=chat_id, text=f"Напоминание: {text}")
-
-async def search_web(query):
-    try:
-        result = tavily_client.search(query=query, max_results=5)
-        texts = []
-        for r in result.get("results", []):
-            texts.append(f"- {r['title']}: {r['content'][:300]}")
-        return "\n".join(texts)
-    except Exception as e:
-        return f"Ошибка поиска: {str(e)}"
-
-async def needs_search(text):
-    response = anthropic_client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=10,
-        system="""Отвечай только YES или NO.
-NO только если это: приветствие, простая математика, личный разговор, просьба написать текст или создать что-то.
-В остальных случаях — YES.""",
-        messages=[{"role": "user", "content": text}]
-    )
-    return response.content[0].text.strip().upper() == "YES"
-
-async def needs_image(text):
-    response = anthropic_client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=10,
-        system="Ты определяешь нужно ли генерировать картинку. Отвечай только YES или NO. YES если просят нарисовать, создать изображение, сгенерировать картинку.",
-        messages=[{"role": "user", "content": text}]
-    )
-    return response.content[0].text.strip().upper() == "YES"
+# ─────────────────────────────────────────────
+#  ВСПОМОГАТЕЛЬНЫЕ AI-ФУНКЦИИ
+# ─────────────────────────────────────────────
 
 async def parse_cron(text):
     response = anthropic_client.messages.create(
@@ -596,6 +699,7 @@ async def parse_cron(text):
         messages=[{"role": "user", "content": text}]
     )
     return response.content[0].text.strip()
+
 
 async def parse_action(text, user_id):
     contacts = get_all_contacts(user_id)
@@ -655,11 +759,11 @@ async def parse_action(text, user_id):
 Если просят удалить контакт — верни JSON:
 {{"action": "contact_delete", "name": "имя"}}
 
-Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — найди контакт в книге и верни JSON:
-{{"action": "send_telegram", "contact_name": "имя из книги контактов", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс"}}
+Если просят написать сообщение кому-то ПРЯМО СЕЙЧАС — верни JSON:
+{{"action": "send_telegram", "contact_name": "имя из книги контактов", "message": "текст сообщения"}}
 
 Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
-{{"action": "send_telegram_scheduled", "contact_name": "имя из книги контактов", "message": "текст сообщения в дружелюбном стиле, приветствие включай только если пользователь его произнёс", "datetime": "YYYY-MM-DD HH:MM"}}
+{{"action": "send_telegram_scheduled", "contact_name": "имя из книги контактов", "message": "текст сообщения", "datetime": "YYYY-MM-DD HH:MM"}}
 
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
@@ -669,8 +773,20 @@ async def parse_action(text, user_id):
     )
     try:
         return json.loads(response.content[0].text.strip())
-    except:
+    except Exception:
         return {"action": "none"}
+
+
+async def needs_image(text):
+    response = anthropic_client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=10,
+        system="Ты определяешь нужно ли генерировать картинку. Отвечай только YES или NO. "
+               "YES если просят нарисовать, создать изображение, сгенерировать картинку.",
+        messages=[{"role": "user", "content": text}]
+    )
+    return response.content[0].text.strip().upper() == "YES"
+
 
 async def generate_image(prompt):
     response = openai_client.images.generate(
@@ -682,6 +798,7 @@ async def generate_image(prompt):
     )
     return response.data[0].url
 
+
 async def text_to_voice(text, file_path):
     clean_text = text.replace("**", "").replace("##", "").replace("#", "").replace("*", "")
     response = openai_client.audio.speech.create(
@@ -690,6 +807,15 @@ async def text_to_voice(text, file_path):
         input=clean_text[:4000]
     )
     response.stream_to_file(file_path)
+
+
+async def send_reminder(chat_id, text):
+    await bot_instance.send_message(chat_id=chat_id, text=f"⏰ Напоминание: {text}")
+
+
+# ─────────────────────────────────────────────
+#  КОМАНДЫ БОТА
+# ─────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
@@ -706,10 +832,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Или просто говорите голосом что нужно сделать!"
     )
 
+
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     await update.message.reply_text("Готовлю брифинг...")
     await send_morning_briefing(chat_id)
+
 
 async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -740,7 +868,6 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name_parts.append(arg)
 
     name = " ".join(name_parts) if name_parts else None
-
     if not name:
         await update.message.reply_text("Укажите имя контакта")
         return
@@ -752,6 +879,7 @@ async def cmd_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if phone:
         result += f"\nТелефон: {phone}"
     await update.message.reply_text(result)
+
 
 async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -771,6 +899,7 @@ async def cmd_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result += "\n"
     await update.message.reply_text(result)
 
+
 async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     items = get_shopping_list(user_id)
@@ -778,6 +907,7 @@ async def cmd_shopping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Список покупок пуст")
         return
     await update.message.reply_text("Список покупок:\n\n" + "\n".join(f"- {i}" for i in items))
+
 
 async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -791,10 +921,16 @@ async def cmd_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result += "Для удаления скажите: удали напоминание #номер"
     await update.message.reply_text(result)
 
+
 async def forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     clear_history(user_id)
     await update.message.reply_text("История разговора очищена!")
+
+
+# ─────────────────────────────────────────────
+#  ОБРАБОТКА СООБЩЕНИЙ
+# ─────────────────────────────────────────────
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Слушаю...")
@@ -813,6 +949,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Ты сказал: {text}")
     os.remove(file_path)
     await process_message(update, context, text)
+
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Анализирую фото...")
@@ -846,8 +983,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_voice(voice=voice_file)
     os.remove(voice_path)
 
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await process_message(update, context, update.message.text)
+
 
 async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     user_id = update.message.from_user.id
@@ -855,6 +994,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     await update.message.reply_text("Думаю...")
 
+    # ── Сначала проверяем структурированные действия ──
     action_data = await parse_action(text, user_id)
 
     if action_data.get("action") == "calendar":
@@ -891,7 +1031,9 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 trigger=DateTrigger(run_date=reminder_time),
                 args=[chat_id, action_data["text"]]
             )
-            await update.message.reply_text(f"Напоминание установлено!\n{action_data['datetime']}\n{action_data['text']}")
+            await update.message.reply_text(
+                f"⏰ Напоминание установлено!\n{action_data['datetime']}\n{action_data['text']}"
+            )
             return
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {str(e)}")
@@ -920,7 +1062,10 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 args=[chat_id, action_data["text"]],
                 id=f"recurring_{reminder_id}"
             )
-            await update.message.reply_text(f"Повторяющееся напоминание установлено!\n{action_data['description']}\n{action_data['text']}\nID: {reminder_id}")
+            await update.message.reply_text(
+                f"🔁 Повторяющееся напоминание установлено!\n{action_data['description']}\n"
+                f"{action_data['text']}\nID: {reminder_id}"
+            )
             return
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {str(e)}")
@@ -942,7 +1087,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         delete_recurring_reminder(user_id, reminder_id)
         try:
             scheduler.remove_job(f"recurring_{reminder_id}")
-        except:
+        except Exception:
             pass
         await update.message.reply_text(f"Напоминание #{reminder_id} удалено!")
         return
@@ -1050,12 +1195,15 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
                 args=[msg_id, contact, message],
                 id=f"scheduled_msg_{msg_id}"
             )
-            await update.message.reply_text(f"Сообщение запланировано!\nКому: {contact['name']}\nКогда: {send_at}\nТекст:\n{message}")
+            await update.message.reply_text(
+                f"📅 Сообщение запланировано!\nКому: {contact['name']}\nКогда: {send_at}\nТекст:\n{message}"
+            )
             return
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {str(e)}")
             return
 
+    # ── Генерация изображения ──
     if await needs_image(text):
         await update.message.reply_text("Генерирую картинку...")
         try:
@@ -1065,23 +1213,28 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             await update.message.reply_text(f"Ошибка генерации: {str(e)}")
         return
 
-    search_result = ""
-    if await needs_search(text):
-        await update.message.reply_text("Ищу в интернете...")
-        search_result = await search_web(text)
+    # ── Умный поиск ──
+    search_result = await smart_search(text)
+    if search_result:
+        await update.message.reply_text("🔍 Ищу в интернете...")
 
+    # ── Ответ Claude ──
     history = get_history(user_id)
     user_content = text
     if search_result:
-        user_content = f"{text}\n\nРезультаты поиска:\n{search_result}"
+        user_content = (
+            f"{text}\n\n"
+            f"Результаты поиска в интернете (используй эти данные как основу ответа):\n"
+            f"{search_result}"
+        )
     history.append({"role": "user", "content": user_content})
 
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=2048,
         system=f"""Ты личный помощник. Отвечай на русском языке.
-Сегодняшняя дата: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%d.%m.%Y')}.
-Если тебе предоставлены результаты поиска — используй их и доверяй им.
+Сегодняшняя дата и время: {datetime.now(pytz.timezone('Europe/Moscow')).strftime('%d.%m.%Y %H:%M')} (МСК).
+Если тебе предоставлены результаты поиска — используй их, доверяй им и отвечай на их основе.
 Давай конкретные ответы без лишних оговорок. Используй эмодзи где уместно.""",
         messages=history
     )
@@ -1092,18 +1245,28 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
 
     await update.message.reply_text(assistant_message)
 
+    # ── Голосовой ответ ──
     os.makedirs("voice_files", exist_ok=True)
     voice_path = f"voice_files/response_{user_id}.mp3"
-    await text_to_voice(assistant_message, voice_path)
-    with open(voice_path, "rb") as voice_file:
-        await update.message.reply_voice(voice=voice_file)
-    os.remove(voice_path)
+    try:
+        await text_to_voice(assistant_message, voice_path)
+        with open(voice_path, "rb") as voice_file:
+            await update.message.reply_voice(voice=voice_file)
+        os.remove(voice_path)
+    except Exception as e:
+        print(f"TTS error: {e}")
+
+
+# ─────────────────────────────────────────────
+#  ЗАПУСК
+# ─────────────────────────────────────────────
 
 def main():
     global bot_instance
     init_db()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     bot_instance = app.bot
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("forget", forget))
     app.add_handler(CommandHandler("contact", cmd_contact))
@@ -1159,6 +1322,7 @@ def main():
     app.post_init = on_startup
     print("Бот запущен!")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
