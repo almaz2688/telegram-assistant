@@ -3,7 +3,9 @@ import base64
 import anthropic
 import json
 import sqlite3
+import aiohttp
 from datetime import datetime, timedelta
+from xml.etree import ElementTree as ET
 from openai import OpenAI
 from dotenv import load_dotenv
 from telegram import Update, Bot, BotCommand
@@ -42,19 +44,50 @@ bot_instance = None
 
 DB_PATH = "/app/data/memory.db"
 
+# Координаты Набережных Челнов
+CHELNY_LAT = 55.7558
+CHELNY_LON = 52.4261
+
 # Домены для разных тематик поиска
 SPORTS_DOMAINS = ["championat.com", "sports.ru", "khl.ru", "sport-express.ru", "matchtv.ru"]
 NEWS_DOMAINS = ["ria.ru", "tass.ru", "rbc.ru", "lenta.ru", "iz.ru", "kommersant.ru"]
-WEATHER_DOMAINS = ["pogoda.ru", "gismeteo.ru", "rp5.ru"]
-FINANCE_DOMAINS = ["rbc.ru", "banki.ru", "cbr.ru", "finance.mail.ru", "investing.com"]
 TECH_DOMAINS = ["techcrunch.com", "habr.com", "vc.ru", "wired.com", "theverge.com"]
 CRYPTO_DOMAINS = ["coindesk.com", "cointelegraph.com", "decrypt.co", "bits.media", "cryptonews.com"]
 REALTY_DOMAINS = ["cian.ru", "realty.rbc.ru", "bn.ru", "irn.ru", "domclick.ru"]
+FINANCE_DOMAINS = ["rbc.ru", "banki.ru", "cbr.ru", "finance.mail.ru", "investing.com"]
 
 DATE_KEYWORDS = [
     "сегодня", "today", "сейчас", "now", "играет", "матч", "матчи",
     "расписание", "результат", "счёт", "погода", "курс", "новости"
 ]
+
+# Коды погоды WMO -> описание
+WMO_CODES = {
+    0: "ясно ☀️",
+    1: "преимущественно ясно 🌤",
+    2: "переменная облачность ⛅",
+    3: "пасмурно ☁️",
+    45: "туман 🌫",
+    48: "туман с изморозью 🌫",
+    51: "лёгкая морось 🌦",
+    53: "морось 🌦",
+    55: "сильная морось 🌧",
+    61: "небольшой дождь 🌧",
+    63: "дождь 🌧",
+    65: "сильный дождь 🌧",
+    71: "небольшой снег 🌨",
+    73: "снег 🌨",
+    75: "сильный снег ❄️",
+    77: "снежные зёрна ❄️",
+    80: "ливень 🌧",
+    81: "ливни 🌧",
+    82: "сильный ливень ⛈",
+    85: "снегопад 🌨",
+    86: "сильный снегопад ❄️",
+    95: "гроза ⛈",
+    96: "гроза с градом ⛈",
+    99: "гроза с сильным градом ⛈",
+}
 
 ENTREPRENEUR_QUOTES = [
     ("Ваше время ограничено, не тратьте его, живя чужой жизнью.", "Стив Джобс"),
@@ -155,8 +188,8 @@ CAPABILITIES_TEXT = """🤖 ЧТО УМЕЕТ ТВОЙ ПОМОЩНИК
 
 ☀️ УТРЕННИЙ БРИФИНГ (каждый день в 6:00)
 • Календарь на день
-• Погода в Челнах
-• Курсы валют (USD, EUR, KGS)
+• Погода в Челнах (Open-Meteo)
+• Курсы валют ЦБ РФ (USD, EUR, KGS)
 • 5 новостей: вайб-кодинг, ИИ, экономика, крипта, недвижимость
 • Цитата великого предпринимателя
 
@@ -498,7 +531,7 @@ def mark_scheduled_message_sent(msg_id):
 
 
 # ─────────────────────────────────────────────
-#  УМНЫЙ ПОИСК
+#  УМНЫЙ ПОИСК (только для новостей и спорта)
 # ─────────────────────────────────────────────
 
 async def search_web(query: str, include_domains: list = None, max_results: int = 5) -> str:
@@ -532,11 +565,11 @@ async def smart_search(user_text: str) -> str:
             system=f"""Сегодня {now_str} (московское время).
 Определи, нужен ли поиск в интернете для ответа на сообщение пользователя.
 
-Поиск НУЖЕН: новости, погода, курсы валют, спорт (результаты/расписание/счёт/матчи), цены, афиша, любые актуальные данные.
-Поиск НЕ НУЖЕН: обычный разговор, написать текст/код, объяснения понятий, математика, личные вопросы.
+Поиск НУЖЕН: новости, спорт (результаты/расписание/счёт/матчи), цены, афиша, любые актуальные данные.
+Поиск НЕ НУЖЕН: погода (есть отдельный модуль), курсы валют (есть отдельный модуль), обычный разговор, написать текст/код, объяснения понятий, математика, личные вопросы.
 
 Если поиск нужен — верни JSON:
-{{"search": true, "query": "поисковый запрос", "topic": "sports|news|weather|finance|general"}}
+{{"search": true, "query": "поисковый запрос", "topic": "sports|news|general"}}
 
 Если поиск не нужен — верни JSON:
 {{"search": false}}
@@ -562,11 +595,118 @@ async def smart_search(user_text: str) -> str:
     domain_map = {
         "sports": SPORTS_DOMAINS,
         "news": NEWS_DOMAINS,
-        "weather": WEATHER_DOMAINS,
-        "finance": FINANCE_DOMAINS,
     }
     domains = domain_map.get(topic)
     return await search_web(query, include_domains=domains)
+
+
+# ─────────────────────────────────────────────
+#  ПОГОДА — Open-Meteo (те же модели что iPhone)
+# ─────────────────────────────────────────────
+
+async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_name: str = "Набережных Челнах") -> str:
+    try:
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            f"&hourly=temperature_2m,precipitation_probability,weathercode,windspeed_10m,apparent_temperature"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode,sunrise,sunset"
+            f"&timezone=Europe%2FMoscow"
+            f"&forecast_days=1"
+        )
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json()
+
+        hourly = data["hourly"]
+        times = hourly["time"]
+        temps = hourly["temperature_2m"]
+        feels = hourly["apparent_temperature"]
+        precip = hourly["precipitation_probability"]
+        codes = hourly["weathercode"]
+        wind = hourly["windspeed_10m"]
+
+        daily = data["daily"]
+        t_max = daily["temperature_2m_max"][0]
+        t_min = daily["temperature_2m_min"][0]
+        day_code = daily["weathercode"][0]
+        max_precip = daily["precipitation_probability_max"][0]
+
+        def get_hour_idx(hour):
+            target = f"T{hour:02d}:00"
+            for i, t in enumerate(times):
+                if t.endswith(target):
+                    return i
+            return 0
+
+        morning_idx = get_hour_idx(8)
+        afternoon_idx = get_hour_idx(14)
+        evening_idx = get_hour_idx(20)
+
+        def fmt_hour(idx):
+            desc = WMO_CODES.get(int(codes[idx]), "")
+            p = int(precip[idx])
+            w = int(wind[idx])
+            t = temps[idx]
+            f = feels[idx]
+            line = f"{t:+.0f}°C (ощущ. {f:+.0f}°C), {desc}, ветер {w} км/ч"
+            if p > 20:
+                line += f", осадки {p}%"
+            return line
+
+        day_desc = WMO_CODES.get(int(day_code), "")
+        result = f"Погода в {city_name}:\n"
+        result += f"🌅 Утро 08:00:  {fmt_hour(morning_idx)}\n"
+        result += f"☀️ День 14:00:  {fmt_hour(afternoon_idx)}\n"
+        result += f"🌆 Вечер 20:00: {fmt_hour(evening_idx)}\n"
+        result += f"📊 День: макс {t_max:+.0f}°C / мин {t_min:+.0f}°C, {day_desc}"
+        if max_precip > 20:
+            result += f", осадки до {max_precip}%"
+        return result
+
+    except Exception as e:
+        print(f"get_weather error: {e}")
+        return "Погода недоступна"
+
+
+# ─────────────────────────────────────────────
+#  КУРСЫ ВАЛЮТ — официальный XML API ЦБ РФ
+# ─────────────────────────────────────────────
+
+async def get_currency() -> str:
+    try:
+        url = "https://www.cbr.ru/scripts/XML_daily.asp"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                content = await resp.read()
+
+        # ЦБ РФ отдаёт XML в кодировке windows-1251
+        xml_text = content.decode("windows-1251")
+        root = ET.fromstring(xml_text)
+
+        rates = {}
+        for valute in root.findall("Valute"):
+            char_code = valute.find("CharCode").text
+            value_str = valute.find("Value").text.replace(",", ".")
+            nominal = int(valute.find("Nominal").text)
+
+            if char_code in ("USD", "EUR", "KGS"):
+                rate = float(value_str) / nominal
+                rates[char_code] = rate
+
+        date_str = root.attrib.get("Date", "")
+
+        result = f"Курс ЦБ РФ на {date_str}:\n"
+        result += f"USD: {rates.get('USD', 0):.2f} руб\n"
+        result += f"EUR: {rates.get('EUR', 0):.2f} руб\n"
+        result += f"KGS: {rates.get('KGS', 0):.4f} руб  (100 сом = {rates.get('KGS', 0) * 100:.2f} руб)"
+        return result
+
+    except Exception as e:
+        print(f"get_currency error: {e}")
+        return "Курсы недоступны"
 
 
 # ─────────────────────────────────────────────
@@ -783,58 +923,6 @@ async def get_five_news(today: str) -> dict:
     return results
 
 
-async def get_weather():
-    try:
-        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
-        raw = await search_web(
-            f"погода Набережные Челны {today}",
-            include_domains=WEATHER_DOMAINS,
-            max_results=3
-        )
-        if not raw:
-            raw = await search_web("погода Набережные Челны прогноз сегодня", max_results=3)
-        if not raw:
-            return "Погода недоступна"
-        response = anthropic_client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=150,
-            system=f"Сегодня {today}. Из текста извлеки прогноз погоды для Набережных Челнов. "
-                   "Укажи температуру утром/днём/вечером и кратко условия (ясно/облачно/дождь). "
-                   "Строго по данным из текста, 2-3 строки. Не додумывай.",
-            messages=[{"role": "user", "content": raw}]
-        )
-        return response.content[0].text.strip()
-    except Exception as e:
-        print(f"get_weather error: {e}")
-        return "Погода недоступна"
-
-
-async def get_currency():
-    try:
-        today = datetime.now(pytz.timezone("Europe/Moscow")).strftime("%d.%m.%Y")
-        raw = await search_web(
-            f"курс доллара евро киргизский сом рубль ЦБ РФ {today}",
-            include_domains=FINANCE_DOMAINS,
-            max_results=3
-        )
-        if not raw:
-            raw = await search_web("курс доллара евро рубль сегодня", max_results=3)
-        if not raw:
-            return "Курсы недоступны"
-        response = anthropic_client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=100,
-            system="Из текста извлеки актуальные курсы валют к рублю. Нужны: USD, EUR, KGS. "
-                   "Формат строго:\nUSD: XX.XX руб\nEUR: XX.XX руб\nKGS: X.XX руб\n"
-                   "Только эти три строки. Не додумывай цифры.",
-            messages=[{"role": "user", "content": raw}]
-        )
-        return response.content[0].text.strip()
-    except Exception as e:
-        print(f"get_currency error: {e}")
-        return "Курсы недоступны"
-
-
 async def send_morning_briefing(chat_id):
     try:
         tz = pytz.timezone("Europe/Moscow")
@@ -849,8 +937,8 @@ async def send_morning_briefing(chat_id):
         await bot_instance.send_message(chat_id=chat_id, text="Готовлю утренний брифинг...")
 
         events = await get_today_events()
-        weather = await get_weather()
-        currency = await get_currency()
+        weather = await get_weather()        # Open-Meteo — без API ключа
+        currency = await get_currency()      # ЦБ РФ XML — официальный
         five_news = await get_five_news(today_str)
         quote_text, quote_author = random.choice(ENTREPRENEUR_QUOTES)
 
@@ -880,7 +968,7 @@ async def send_morning_briefing(chat_id):
             if line.strip():
                 briefing += f"  {line}\n"
 
-        briefing += "\n💰 КУРСЫ ВАЛЮТ:\n"
+        briefing += "\n💰 КУРСЫ ВАЛЮТ (ЦБ РФ):\n"
         for line in currency.split("\n"):
             if line.strip():
                 briefing += f"  {line}\n"
@@ -1037,6 +1125,15 @@ async def parse_action(text, user_id):
 Если просят написать сообщение кому-то В ОПРЕДЕЛЁННОЕ ВРЕМЯ — верни JSON:
 {{"action": "send_telegram_scheduled", "contact_name": "имя из книги контактов", "message": "текст сообщения", "datetime": "YYYY-MM-DD HH:MM"}}
 
+Если просят показать курс валют / курс доллара / курс евро / курс сома — верни JSON:
+{{"action": "currency"}}
+
+Если просят погоду (без уточнения города) — верни JSON:
+{{"action": "weather_chelny"}}
+
+Если просят погоду в конкретном городе — верни JSON:
+{{"action": "weather_city", "city": "название города"}}
+
 Если ничего из вышеперечисленного — верни:
 {{"action": "none"}}
 
@@ -1083,6 +1180,27 @@ async def text_to_voice(text, file_path):
 
 async def send_reminder(chat_id, text):
     await bot_instance.send_message(chat_id=chat_id, text=f"⏰ Напоминание: {text}")
+
+
+# ─────────────────────────────────────────────
+#  ГЕОКОДИРОВАНИЕ ГОРОДА (для погоды по запросу)
+# ─────────────────────────────────────────────
+
+async def geocode_city(city: str):
+    """Возвращает (lat, lon, display_name) или None."""
+    try:
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=ru&format=json"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json()
+        results = data.get("results", [])
+        if not results:
+            return None
+        r = results[0]
+        return r["latitude"], r["longitude"], r.get("name", city)
+    except Exception as e:
+        print(f"geocode_city error: {e}")
+        return None
 
 
 # ─────────────────────────────────────────────
@@ -1460,6 +1578,33 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             await update.message.reply_text(f"Ошибка: {str(e)}")
             return
 
+    # ── Курс валют — прямо с ЦБ РФ ──
+    if action_data.get("action") == "currency":
+        await update.message.reply_text("Запрашиваю курс ЦБ РФ...")
+        result = await get_currency()
+        await update.message.reply_text(result)
+        return
+
+    # ── Погода в Челнах ──
+    if action_data.get("action") == "weather_chelny":
+        await update.message.reply_text("Получаю погоду...")
+        result = await get_weather()
+        await update.message.reply_text(result)
+        return
+
+    # ── Погода в произвольном городе ──
+    if action_data.get("action") == "weather_city":
+        city = action_data.get("city", "")
+        await update.message.reply_text(f"Получаю погоду для {city}...")
+        geo = await geocode_city(city)
+        if not geo:
+            await update.message.reply_text(f"Не удалось найти город: {city}")
+            return
+        lat, lon, display_name = geo
+        result = await get_weather(lat=lat, lon=lon, city_name=display_name)
+        await update.message.reply_text(result)
+        return
+
     # ── Генерация изображения ──
     if await needs_image(text):
         await update.message.reply_text("Генерирую картинку...")
@@ -1470,7 +1615,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             await update.message.reply_text(f"Ошибка генерации: {str(e)}")
         return
 
-    # ── Умный поиск ──
+    # ── Умный поиск (новости, спорт) ──
     search_result = await smart_search(text)
     if search_result:
         await update.message.reply_text("🔍 Нашёл информацию, формирую ответ...")
