@@ -4,6 +4,7 @@ import anthropic
 import json
 import sqlite3
 import aiohttp
+import asyncio
 from datetime import datetime, timedelta
 from xml.etree import ElementTree as ET
 from openai import OpenAI
@@ -605,69 +606,73 @@ async def smart_search(user_text: str) -> str:
 # ─────────────────────────────────────────────
 
 async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_name: str = "Набережных Челнах") -> str:
-    try:
-        url = (
-            f"https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            f"&hourly=temperature_2m,precipitation_probability,weathercode,windspeed_10m,apparent_temperature"
-            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode,sunrise,sunset"
-            f"&timezone=Europe%2FMoscow"
-            f"&forecast_days=1"
-        )
+    url = (
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        f"&hourly=temperature_2m,precipitation_probability,weathercode,windspeed_10m,apparent_temperature"
+        f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode,sunrise,sunset"
+        f"&timezone=Europe%2FMoscow"
+        f"&forecast_days=1"
+    )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                data = await resp.json()
+    for attempt in range(3):  # 3 попытки
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    data = await resp.json()
 
-        hourly = data["hourly"]
-        times = hourly["time"]
-        temps = hourly["temperature_2m"]
-        feels = hourly["apparent_temperature"]
-        precip = hourly["precipitation_probability"]
-        codes = hourly["weathercode"]
-        wind = hourly["windspeed_10m"]
+            hourly = data["hourly"]
+            times  = hourly["time"]
+            temps  = hourly["temperature_2m"]
+            feels  = hourly["apparent_temperature"]
+            precip = hourly["precipitation_probability"]
+            codes  = hourly["weathercode"]
+            wind   = hourly["windspeed_10m"]
 
-        daily = data["daily"]
-        t_max = daily["temperature_2m_max"][0]
-        t_min = daily["temperature_2m_min"][0]
-        day_code = daily["weathercode"][0]
-        max_precip = daily["precipitation_probability_max"][0]
+            daily     = data["daily"]
+            t_max     = daily["temperature_2m_max"][0]
+            t_min     = daily["temperature_2m_min"][0]
+            day_code  = daily["weathercode"][0]
+            max_precip = daily["precipitation_probability_max"][0]
 
-        def get_hour_idx(hour):
-            target = f"T{hour:02d}:00"
-            for i, t in enumerate(times):
-                if t.endswith(target):
-                    return i
-            return 0
+            def get_hour_idx(hour):
+                target = f"T{hour:02d}:00"
+                for i, t in enumerate(times):
+                    if t.endswith(target):
+                        return i
+                return 0
 
-        morning_idx = get_hour_idx(8)
-        afternoon_idx = get_hour_idx(14)
-        evening_idx = get_hour_idx(20)
+            morning_idx   = get_hour_idx(8)
+            afternoon_idx = get_hour_idx(14)
+            evening_idx   = get_hour_idx(20)
 
-        def fmt_hour(idx):
-            desc = WMO_CODES.get(int(codes[idx]), "")
-            p = int(precip[idx])
-            w = int(wind[idx])
-            t = temps[idx]
-            f = feels[idx]
-            line = f"{t:+.0f}°C (ощущ. {f:+.0f}°C), {desc}, ветер {w} км/ч"
-            if p > 20:
-                line += f", осадки {p}%"
-            return line
+            def fmt_hour(idx):
+                desc = WMO_CODES.get(int(codes[idx]), "")
+                p    = int(precip[idx])
+                w    = int(wind[idx])
+                t    = temps[idx]
+                f    = feels[idx]
+                line = f"{t:+.0f}°C (ощущ. {f:+.0f}°C), {desc}, ветер {w} км/ч"
+                if p > 20:
+                    line += f", осадки {p}%"
+                return line
 
-        day_desc = WMO_CODES.get(int(day_code), "")
-        result = f"Погода в {city_name}:\n"
-        result += f"🌅 Утро 08:00:  {fmt_hour(morning_idx)}\n"
-        result += f"☀️ День 14:00:  {fmt_hour(afternoon_idx)}\n"
-        result += f"🌆 Вечер 20:00: {fmt_hour(evening_idx)}\n"
-        result += f"📊 День: макс {t_max:+.0f}°C / мин {t_min:+.0f}°C, {day_desc}"
-        if max_precip > 20:
-            result += f", осадки до {max_precip}%"
-        return result
+            day_desc = WMO_CODES.get(int(day_code), "")
+            result   = f"Погода в {city_name}:\n"
+            result  += f"🌅 Утро 08:00:  {fmt_hour(morning_idx)}\n"
+            result  += f"☀️ День 14:00:  {fmt_hour(afternoon_idx)}\n"
+            result  += f"🌆 Вечер 20:00: {fmt_hour(evening_idx)}\n"
+            result  += f"📊 День: макс {t_max:+.0f}°C / мин {t_min:+.0f}°C, {day_desc}"
+            if max_precip > 20:
+                result += f", осадки до {max_precip}%"
+            return result
 
-    except Exception as e:
-        print(f"get_weather error: {e}")
-        return "Погода недоступна"
+        except Exception as e:
+            print(f"get_weather attempt {attempt + 1} error: {e}")
+            if attempt < 2:
+                await asyncio.sleep(3)  # пауза 3 секунды перед следующей попыткой
+
+    return "Погода временно недоступна"
 
 
 # ─────────────────────────────────────────────
@@ -1175,7 +1180,8 @@ async def text_to_voice(text, file_path):
         voice="nova",
         input=clean_text[:4000]
     )
-    response.stream_to_file(file_path)
+    with open(file_path, 'wb') as f:
+        f.write(response.content)
 
 
 async def send_reminder(chat_id, text):
