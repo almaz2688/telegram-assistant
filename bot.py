@@ -49,13 +49,52 @@ DB_PATH = "/app/data/memory.db"
 CHELNY_LAT = 55.7558
 CHELNY_LON = 52.4261
 
-# Домены для разных тематик поиска
-SPORTS_DOMAINS = ["championat.com", "sports.ru", "khl.ru", "sport-express.ru", "matchtv.ru"]
-NEWS_DOMAINS = ["ria.ru", "tass.ru", "rbc.ru", "lenta.ru", "iz.ru", "kommersant.ru"]
-TECH_DOMAINS = ["techcrunch.com", "habr.com", "vc.ru", "wired.com", "theverge.com"]
+# ─────────────────────────────────────────────
+#  ДОМЕНЫ ДЛЯ ПОИСКА
+# ─────────────────────────────────────────────
+
+KHL_DOMAINS  = ["khl.ru", "championat.com", "sport-express.ru", "sports.ru", "matchtv.ru"]
+NHL_DOMAINS  = ["nhl.com", "espn.com", "sportsnet.ca", "nhltraderumors.us", "theathleticnhl.com"]
+VHL_DOMAINS  = ["vhlru.ru", "sports.ru", "championat.com", "sport-express.ru"]
+SPORTS_DOMAINS = list(dict.fromkeys(KHL_DOMAINS + NHL_DOMAINS + VHL_DOMAINS))  # без дублей
+
+NEWS_DOMAINS   = ["ria.ru", "tass.ru", "rbc.ru", "lenta.ru", "iz.ru", "kommersant.ru"]
+TECH_DOMAINS   = ["techcrunch.com", "habr.com", "vc.ru", "wired.com", "theverge.com"]
 CRYPTO_DOMAINS = ["coindesk.com", "cointelegraph.com", "decrypt.co", "bits.media", "cryptonews.com"]
 REALTY_DOMAINS = ["cian.ru", "realty.rbc.ru", "bn.ru", "irn.ru", "domclick.ru"]
 FINANCE_DOMAINS = ["rbc.ru", "banki.ru", "cbr.ru", "finance.mail.ru", "investing.com"]
+
+# Ключевые слова -> домены для принудительного поиска (None = все SPORTS_DOMAINS)
+FORCE_SEARCH_KEYWORDS = {
+    # КХЛ
+    "кхл":        KHL_DOMAINS,
+    "khl":        KHL_DOMAINS,
+    "континентальная хоккейная":  KHL_DOMAINS,
+    # НХЛ
+    "нхл":        NHL_DOMAINS,
+    "nhl":        NHL_DOMAINS,
+    "национальная хоккейная лига": NHL_DOMAINS,
+    # ВХЛ
+    "вхл":        VHL_DOMAINS,
+    "vhl":        VHL_DOMAINS,
+    "высшая хоккейная":  VHL_DOMAINS,
+    # Общие спортивные
+    "матч":       None,
+    "матчи":      None,
+    "играет":     None,
+    "играют":     None,
+    "расписание": None,
+    "результат":  None,
+    "счёт":       None,
+    "счет":       None,
+    "плей-офф":   None,
+    "playoff":    None,
+    "плейофф":    None,
+    "хоккей":     None,
+    "турнир":     None,
+    "чемпионат":  None,
+    "таблица":    None,
+}
 
 DATE_KEYWORDS = [
     "сегодня", "today", "сейчас", "now", "играет", "матч", "матчи",
@@ -174,7 +213,7 @@ CAPABILITIES_TEXT = """🤖 ЧТО УМЕЕТ ТВОЙ ПОМОЩНИК
 • Новости и актуальные события
 • Погода в любом городе
 • Курсы валют
-• Спорт: расписание, результаты, счёт
+• Спорт: КХЛ, НХЛ, ВХЛ — расписание, результаты, счёт
 • Любые вопросы требующие свежих данных
 
 🖼 ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ
@@ -268,11 +307,26 @@ INSTRUCTIONS_TEXT = """📖 ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ
 ⚠️ Контакт должен быть сохранён заранее
 
 ━━━━━━━━━━━━━━━━
+🏒 ХОККЕЙ И СПОРТ
+
+КХЛ:
+"Когда играет Авангард?"
+"Результат матча Ак Барс сегодня"
+"Расписание КХЛ на эту неделю"
+
+НХЛ:
+"Когда играет Торонто в НХЛ?"
+"Результаты НХЛ вчера"
+
+ВХЛ:
+"Расписание ВХЛ на выходные"
+"Результаты ВХЛ сегодня"
+
+━━━━━━━━━━━━━━━━
 🔍 ПОИСК И ВОПРОСЫ
 
 Просто пишите или говорите голосом:
 "Какой курс доллара сегодня?"
-"Кто играет в КХЛ сегодня?"
 "Погода в Москве на выходные"
 "Последние новости про биткоин"
 "Объясни что такое вайб-кодинг"
@@ -532,7 +586,7 @@ def mark_scheduled_message_sent(msg_id):
 
 
 # ─────────────────────────────────────────────
-#  УМНЫЙ ПОИСК (только для новостей и спорта)
+#  УМНЫЙ ПОИСК
 # ─────────────────────────────────────────────
 
 async def search_web(query: str, include_domains: list = None, max_results: int = 5) -> str:
@@ -558,7 +612,22 @@ async def smart_search(user_text: str) -> str:
     now = datetime.now(tz)
     now_str = now.strftime("%d.%m.%Y %H:%M")
     today_str = now.strftime("%d.%m.%Y")
+    text_lower = user_text.lower()
 
+    # ── Шаг 1: принудительный поиск по спортивным ключевым словам ──
+    for keyword, domains in FORCE_SEARCH_KEYWORDS.items():
+        if keyword in text_lower:
+            query = f"{user_text} {today_str}"
+            search_domains = domains if domains else SPORTS_DOMAINS
+            print(f"[smart_search] Принудительный поиск: '{keyword}' -> {search_domains}")
+            result = await search_web(query, include_domains=search_domains)
+            # Если специализированный поиск вернул пустой результат — пробуем без ограничений
+            if not result:
+                print(f"[smart_search] Специализированный поиск пуст, пробуем без фильтра доменов")
+                result = await search_web(query)
+            return result
+
+    # ── Шаг 2: Claude решает нужен ли поиск для остальных запросов ──
     try:
         resp = anthropic_client.messages.create(
             model="claude-opus-4-5",
@@ -566,11 +635,21 @@ async def smart_search(user_text: str) -> str:
             system=f"""Сегодня {now_str} (московское время).
 Определи, нужен ли поиск в интернете для ответа на сообщение пользователя.
 
-Поиск НУЖЕН: новости, спорт (результаты/расписание/счёт/матчи), цены, афиша, любые актуальные данные.
-Поиск НЕ НУЖЕН: погода (есть отдельный модуль), курсы валют (есть отдельный модуль), обычный разговор, написать текст/код, объяснения понятий, математика, личные вопросы.
+Поиск НУЖЕН:
+- новости, актуальные события
+- спорт (результаты/расписание/счёт/матчи/турниры)
+- цены, курсы криптовалют и акций
+- афиша, мероприятия
+- любые данные, которые меняются каждый день
+
+Поиск НЕ НУЖЕН:
+- погода (есть отдельный модуль)
+- курсы ЦБ РФ (есть отдельный модуль)
+- обычный разговор, написать текст/код
+- объяснения понятий, математика, личные вопросы
 
 Если поиск нужен — верни JSON:
-{{"search": true, "query": "поисковый запрос", "topic": "sports|news|general"}}
+{{"search": true, "query": "поисковый запрос", "topic": "sports_khl|sports_nhl|sports_vhl|sports|news|general"}}
 
 Если поиск не нужен — верни JSON:
 {{"search": false}}
@@ -589,20 +668,29 @@ async def smart_search(user_text: str) -> str:
     query = data.get("query", user_text)
     topic = data.get("topic", "general")
 
-    text_lower = user_text.lower()
     if any(kw in text_lower for kw in DATE_KEYWORDS):
         query = f"{query} {today_str}"
 
     domain_map = {
-        "sports": SPORTS_DOMAINS,
-        "news": NEWS_DOMAINS,
+        "sports_khl": KHL_DOMAINS,
+        "sports_nhl": NHL_DOMAINS,
+        "sports_vhl": VHL_DOMAINS,
+        "sports":     SPORTS_DOMAINS,
+        "news":       NEWS_DOMAINS,
     }
     domains = domain_map.get(topic)
-    return await search_web(query, include_domains=domains)
+    result = await search_web(query, include_domains=domains)
+
+    # Запасной поиск без фильтра если ничего не нашли
+    if not result and domains:
+        print(f"[smart_search] Поиск по доменам пуст, пробуем без фильтра")
+        result = await search_web(query)
+
+    return result
 
 
 # ─────────────────────────────────────────────
-#  ПОГОДА — Open-Meteo (те же модели что iPhone)
+#  ПОГОДА — Open-Meteo
 # ─────────────────────────────────────────────
 
 async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_name: str = "Набережных Челнах") -> str:
@@ -615,7 +703,7 @@ async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_nam
         f"&forecast_days=1"
     )
 
-    for attempt in range(3):  # 3 попытки
+    for attempt in range(3):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -629,10 +717,10 @@ async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_nam
             codes  = hourly["weathercode"]
             wind   = hourly["windspeed_10m"]
 
-            daily     = data["daily"]
-            t_max     = daily["temperature_2m_max"][0]
-            t_min     = daily["temperature_2m_min"][0]
-            day_code  = daily["weathercode"][0]
+            daily      = data["daily"]
+            t_max      = daily["temperature_2m_max"][0]
+            t_min      = daily["temperature_2m_min"][0]
+            day_code   = daily["weathercode"][0]
             max_precip = daily["precipitation_probability_max"][0]
 
             def get_hour_idx(hour):
@@ -670,7 +758,7 @@ async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_nam
         except Exception as e:
             print(f"get_weather attempt {attempt + 1} error: {e}")
             if attempt < 2:
-                await asyncio.sleep(3)  # пауза 3 секунды перед следующей попыткой
+                await asyncio.sleep(3)
 
     return "Погода временно недоступна"
 
@@ -682,12 +770,10 @@ async def get_weather(lat: float = CHELNY_LAT, lon: float = CHELNY_LON, city_nam
 async def get_currency() -> str:
     try:
         url = "https://www.cbr.ru/scripts/XML_daily.asp"
-
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 content = await resp.read()
 
-        # ЦБ РФ отдаёт XML в кодировке windows-1251
         xml_text = content.decode("windows-1251")
         root = ET.fromstring(xml_text)
 
@@ -696,14 +782,12 @@ async def get_currency() -> str:
             char_code = valute.find("CharCode").text
             value_str = valute.find("Value").text.replace(",", ".")
             nominal = int(valute.find("Nominal").text)
-
             if char_code in ("USD", "EUR", "KGS"):
                 rate = float(value_str) / nominal
                 rates[char_code] = rate
 
         date_str = root.attrib.get("Date", "")
-
-        result = f"Курс ЦБ РФ на {date_str}:\n"
+        result  = f"Курс ЦБ РФ на {date_str}:\n"
         result += f"USD: {rates.get('USD', 0):.2f} руб\n"
         result += f"EUR: {rates.get('EUR', 0):.2f} руб\n"
         result += f"KGS: {rates.get('KGS', 0):.4f} руб  (100 сом = {rates.get('KGS', 0) * 100:.2f} руб)"
@@ -773,7 +857,7 @@ async def create_calendar_event(title, start_datetime, reminder_minutes=60):
         event = {
             "summary": title,
             "start": {"dateTime": start_dt.isoformat(), "timeZone": "Europe/Moscow"},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Europe/Moscow"},
+            "end":   {"dateTime": end_dt.isoformat(),   "timeZone": "Europe/Moscow"},
             "reminders": {
                 "useDefault": False,
                 "overrides": [
@@ -798,10 +882,7 @@ async def delete_calendar_event(title, date):
         time_min = tz.localize(date_dt).isoformat()
         time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
         events = service.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            q=title
+            calendarId="primary", timeMin=time_min, timeMax=time_max, q=title
         ).execute()
         items = events.get("items", [])
         if not items:
@@ -823,11 +904,8 @@ async def list_calendar_events(date):
         time_min = tz.localize(date_dt).isoformat()
         time_max = tz.localize(date_dt.replace(hour=23, minute=59)).isoformat()
         events = service.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy="startTime"
+            calendarId="primary", timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy="startTime"
         ).execute()
         items = events.get("items", [])
         if not items:
@@ -854,8 +932,7 @@ async def list_calendar_events(date):
 #  УТРЕННИЙ БРИФИНГ
 # ─────────────────────────────────────────────
 
-async def get_news_by_topic(topic_query: str, topic_label: str,
-                            domains: list, today: str) -> str:
+async def get_news_by_topic(topic_query: str, topic_label: str, domains: list, today: str) -> str:
     try:
         raw = ""
         if domains:
@@ -941,13 +1018,13 @@ async def send_morning_briefing(chat_id):
 
         await bot_instance.send_message(chat_id=chat_id, text="Готовлю утренний брифинг...")
 
-        events = await get_today_events()
-        weather = await get_weather()        # Open-Meteo — без API ключа
-        currency = await get_currency()      # ЦБ РФ XML — официальный
+        events   = await get_today_events()
+        weather  = await get_weather()
+        currency = await get_currency()
         five_news = await get_five_news(today_str)
         quote_text, quote_author = random.choice(ENTREPRENEUR_QUOTES)
 
-        briefing = "☀️ Доброе утро, Алмаз!\n\n"
+        briefing  = "☀️ Доброе утро, Алмаз!\n\n"
         briefing += f"📆 {day_name}, {date_str}\n"
         briefing += "━━━━━━━━━━━━━━━━\n\n"
 
@@ -1189,11 +1266,10 @@ async def send_reminder(chat_id, text):
 
 
 # ─────────────────────────────────────────────
-#  ГЕОКОДИРОВАНИЕ ГОРОДА (для погоды по запросу)
+#  ГЕОКОДИРОВАНИЕ ГОРОДА
 # ─────────────────────────────────────────────
 
 async def geocode_city(city: str):
-    """Возвращает (lat, lon, display_name) или None."""
     try:
         url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=ru&format=json"
         async with aiohttp.ClientSession() as session:
@@ -1584,21 +1660,18 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             await update.message.reply_text(f"Ошибка: {str(e)}")
             return
 
-    # ── Курс валют — прямо с ЦБ РФ ──
     if action_data.get("action") == "currency":
         await update.message.reply_text("Запрашиваю курс ЦБ РФ...")
         result = await get_currency()
         await update.message.reply_text(result)
         return
 
-    # ── Погода в Челнах ──
     if action_data.get("action") == "weather_chelny":
         await update.message.reply_text("Получаю погоду...")
         result = await get_weather()
         await update.message.reply_text(result)
         return
 
-    # ── Погода в произвольном городе ──
     if action_data.get("action") == "weather_city":
         city = action_data.get("city", "")
         await update.message.reply_text(f"Получаю погоду для {city}...")
@@ -1611,7 +1684,6 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         await update.message.reply_text(result)
         return
 
-    # ── Генерация изображения ──
     if await needs_image(text):
         await update.message.reply_text("Генерирую картинку...")
         try:
@@ -1621,7 +1693,7 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE, te
             await update.message.reply_text(f"Ошибка генерации: {str(e)}")
         return
 
-    # ── Умный поиск (новости, спорт) ──
+    # ── Умный поиск (спорт, новости и т.д.) ──
     search_result = await smart_search(text)
     if search_result:
         await update.message.reply_text("🔍 Нашёл информацию, формирую ответ...")
@@ -1733,15 +1805,15 @@ def main():
             print("Утренний брифинг запланирован на 6:00 МСК")
 
         await application.bot.set_my_commands([
-            BotCommand("start", "Главное меню"),
-            BotCommand("help", "Что умеет помощник"),
+            BotCommand("start",        "Главное меню"),
+            BotCommand("help",         "Что умеет помощник"),
             BotCommand("instructions", "Инструкция по использованию"),
-            BotCommand("contact", "Добавить контакт"),
-            BotCommand("contacts", "Все контакты"),
-            BotCommand("shopping", "Список покупок"),
-            BotCommand("reminders", "Повторяющиеся напоминания"),
-            BotCommand("briefing", "Утренний брифинг сейчас"),
-            BotCommand("forget", "Очистить историю"),
+            BotCommand("contact",      "Добавить контакт"),
+            BotCommand("contacts",     "Все контакты"),
+            BotCommand("shopping",     "Список покупок"),
+            BotCommand("reminders",    "Повторяющиеся напоминания"),
+            BotCommand("briefing",     "Утренний брифинг сейчас"),
+            BotCommand("forget",       "Очистить историю"),
         ])
 
     app.post_init = on_startup
